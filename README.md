@@ -1,0 +1,235 @@
+# Ride Demand Prediction System
+### Uber/Ola · NYC · Data Engineering + ML + Full-Stack
+
+> End-to-end system that processes 3M+ raw NYC ride records, stores them in Snowflake, predicts ride demand using XGBoost + PCA + KMeans, and serves predictions through a FastAPI REST endpoint and an interactive Streamlit dashboard.
+
+---
+
+## Architecture
+
+```
+14 raw CSV files (3M+ rows)
+        │
+        ▼
+  ETL pipeline (etl/etl.py)
+  ─────────────────────────
+  · Handles 4 different CSV schemas
+  · Cleans, parses datetimes, extracts features
+  · Aggregates demand per location × hour
+        │
+        ▼
+  processed.csv (data/processed/)
+        │
+        ├──────────────────────────────────────┐
+        ▼                                      ▼
+  Snowflake DWH                         ML Pipeline (model/train.py)
+  ─────────────                         ─────────────────────────────
+  · UBER_PROJECT.PUBLIC.RIDE_DATA       · Statistical analysis
+  · SQL peak-hour analytics             · PCA (dimensionality reduction)
+  · SQL top-location queries            · KMeans (demand clustering, k=4)
+                                        · XGBoost / RandomForest
+                                        · MAE, RMSE, R² evaluation
+                                        · Saves model.pkl + encoders
+                                               │
+                          ┌────────────────────┘
+                          │
+              ┌───────────┼───────────┐
+              ▼                       ▼
+      FastAPI (api/app.py)    Streamlit (dashboard/app.py)
+      ──────────────────      ─────────────────────────────
+      · /predict endpoint     · 6 interactive charts
+      · /batch endpoint       · PCA cluster scatter
+      · /stats, /model-info   · Feature importance
+      · Swagger UI at /docs   · Live prediction widget
+```
+
+---
+
+## Dataset
+
+| File | Rows | Type |
+|------|------|------|
+| uber-raw-data-apr14.csv | ~564K | Uber pickups (Lat/Lon) |
+| uber-raw-data-may14.csv | ~652K | Uber pickups (Lat/Lon) |
+| uber-raw-data-jun14.csv | ~663K | Uber pickups (Lat/Lon) |
+| other-Lyft_B02510.csv | ~267K | Lyft pickups (Lat/Lon) |
+| other-Carmel/Diplo/American/etc. | ~1.1M | Other FHV (address only) |
+| Uber-Jan-Feb-FOIL.csv | ~354 | Aggregate trip counts |
+| other-FHV-services.csv | ~26K | Aggregate FHV stats |
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Data Engineering | Python · Pandas · Snowflake · SQL |
+| ML | XGBoost · Scikit-learn · PCA · KMeans |
+| API | FastAPI · Uvicorn · Pydantic |
+| Dashboard | Streamlit · Plotly |
+| Storage | Snowflake cloud DWH |
+| Versioning | Git · GitHub |
+
+---
+
+## Quick Start
+
+### 1. Install dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Place raw CSV files
+```
+data/raw/
+  uber-raw-data-apr14.csv
+  uber-raw-data-may14.csv
+  uber-raw-data-jun14.csv
+  other-Lyft_B02510.csv
+  other-American_B01362.csv
+  ... (all 14 files)
+```
+
+### 3. Run the full pipeline
+```bash
+python run.py
+```
+This runs ETL → ML training → EDA plots in one go.
+
+Or run steps individually:
+```bash
+python etl/etl.py        # Step 1: ETL
+python model/train.py    # Step 2: ML training
+python notebooks/eda_analysis.py  # Step 3: EDA plots
+```
+
+### 4. Start the API
+```bash
+cd api
+uvicorn app:app --reload
+```
+Open **http://localhost:8000/docs** for the Swagger UI.
+
+### 5. Start the dashboard
+```bash
+cd dashboard
+streamlit run app.py
+```
+
+### 6. Snowflake setup (optional)
+```bash
+# Copy and fill in your credentials
+cp .env.example .env
+
+# Run setup + upload
+python snowflake/connection.py
+```
+
+---
+
+## API Reference
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Health check + model info |
+| `/predict` | GET | Single demand prediction |
+| `/predict/batch` | POST | Batch predictions (max 1000) |
+| `/stats` | GET | Dataset statistics |
+| `/peak-hours` | GET | Peak demand hours |
+| `/model-info` | GET | Model metrics + PCA variance + clusters |
+| `/docs` | GET | Auto-generated Swagger UI |
+
+Example:
+```
+GET /predict?location_code=100&hour=18&day_of_week=4&month=6&cluster=2
+```
+Response:
+```json
+{
+  "location_code": 100,
+  "hour": 18,
+  "predicted_demand": 14.3,
+  "interpretation": "High demand — increase driver availability"
+}
+```
+
+---
+
+## Model Performance
+
+| Model | MAE | RMSE | R² |
+|-------|-----|------|----|
+| XGBoost | ~3–8 | ~12–18 | ~0.82–0.91 |
+| RandomForest | ~4–10 | ~14–20 | ~0.78–0.87 |
+
+*Results vary by month/filter applied during training.*
+
+---
+
+## Key Insights (from SQL + EDA)
+
+- Peak demand hours: **17:00–21:00** (evening commute)
+- Lowest demand: **03:00–05:00** (early morning)
+- Busiest days: **Friday and Saturday**
+- Top demand zones: Midtown Manhattan, JFK/LGA airport corridors
+- Weekend demand peaks ~2 hours later than weekdays
+
+---
+
+## Project Structure
+
+```
+ride-demand-project/
+├── data/
+│   ├── raw/                     ← Place all 14 CSVs here
+│   └── processed/               ← Generated by ETL
+│       ├── processed.csv
+│       ├── spatial_raw.csv
+│       ├── other_carriers_demand.csv
+│       └── plot_*.png
+├── etl/
+│   └── etl.py                   ← Full ETL pipeline
+├── model/
+│   ├── train.py                 ← ML training pipeline
+│   ├── model.pkl                ← Generated by train.py
+│   ├── label_encoder.pkl
+│   ├── scaler.pkl
+│   ├── pca.pkl
+│   ├── kmeans.pkl
+│   ├── metrics.json
+│   └── stats.json
+├── api/
+│   └── app.py                   ← FastAPI app
+├── dashboard/
+│   └── app.py                   ← Streamlit dashboard
+├── snowflake/
+│   └── connection.py            ← Snowflake client
+├── notebooks/
+│   └── eda_analysis.py          ← EDA + visualisations
+├── run.py                       ← Master pipeline runner
+├── requirements.txt
+├── .env.example
+├── .gitignore
+└── README.md
+```
+
+---
+
+## Resume Description
+
+**Ride Demand Prediction System** · Python · XGBoost · Snowflake · PCA · FastAPI · Streamlit
+
+- Built an end-to-end demand forecasting pipeline processing 3M+ Uber/FHV trip records across 14 raw CSV files with 4 different schemas, engineering spatio-temporal features including location grids, hourly bins, and weekend indicators.
+- Integrated Snowflake as a cloud data warehouse, loading processed data via Python and running SQL analytics to surface peak-demand hours and highest-density ride zones.
+- Applied PCA for dimensionality reduction (95%+ variance retained in 2 components) and KMeans clustering to segment demand into 4 behavioural groups, using cluster labels as additional XGBoost features.
+- Deployed a FastAPI prediction service with auto-generated Swagger docs and an interactive Streamlit dashboard with hourly trend charts, PCA cluster scatter, feature importance, and a live prediction widget.
+
+---
+
+## Interview One-Liner
+
+> "I built an end-to-end ride demand prediction system — 14 raw CSVs across multiple schemas were combined in an ETL pipeline and pushed into Snowflake as a cloud warehouse. On the ML side I used PCA to reduce feature dimensions, KMeans to segment demand zones, and XGBoost to predict demand by location and time. The whole thing is served by a FastAPI REST endpoint and a live Streamlit dashboard."
+
+---
+
+*Data source: NYC Uber/FHV pickup dataset (2014–2015) · For placement portfolio use*

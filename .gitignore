@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Data (raw CSVs — too large for git)
+data/raw/
+data/processed/*.csv
+data/processed/*.png
+
+# Model artefacts (regenerate from train.py)
+model/model.pkl
+model/label_encoder.pkl
+model/scaler.pkl
+model/pca.pkl
+model/kmeans.pkl
+model/metrics.json
+model/stats.json
+model/cluster_info.json
+
+# Secrets
+.env
+*.pem
+*.key
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# OS
+.DS_Store
+Thumbs.db
