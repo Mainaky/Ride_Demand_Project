@@ -1,41 +1,30 @@
 """
 FastAPI — Ride Demand Prediction API
 =====================================
-Endpoints:
-  GET  /                    → health check + model info
-  GET  /predict             → predict demand for location_code + hour + params
-  POST /predict/batch       → predict for a list of inputs
-  GET  /stats               → dataset statistics
-  GET  /peak-hours          → top demand hours from training data
-  GET  /docs                → auto-generated Swagger UI (built-in)
+Regression  : /predict        → predicted demand count
+Classification: /classify     → demand category + probabilities
+Batch       : /predict/batch  → multiple predictions at once
+Info        : /stats, /model-info, /peak-hours
 """
 
-import os
-import json
+import os, json
 import numpy as np
 import joblib
-from typing import List, Optional
+from typing import List
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-# ── Load artefacts ──────────────────────────────────────────────
-BASE_DIR    = os.path.dirname(__file__)
-MODEL_DIR   = os.path.join(BASE_DIR, "..", "model")
+BASE_DIR  = os.path.dirname(__file__)
+MODEL_DIR = os.path.join(BASE_DIR, "..", "model")
 
 def _load(name):
-    path = os.path.join(MODEL_DIR, name)
-    if not os.path.exists(path):
-        raise RuntimeError(
-            f"{name} not found at {path}. "
-            f"Run `python model/train.py` first."
-        )
-    return joblib.load(path)
+    p = os.path.join(MODEL_DIR, name)
+    if not os.path.exists(p):
+        raise RuntimeError(f"{name} not found. Run python model/train.py first.")
+    return joblib.load(p)
 
-model       = _load("model.pkl")
-label_enc   = _load("label_encoder.pkl")
-scaler      = _load("scaler.pkl")
-pca_model   = _load("pca.pkl")
-kmeans      = _load("kmeans.pkl")
+model      = _load("model.pkl")
+classifier = _load("classifier.pkl")
 
 metrics_path = os.path.join(MODEL_DIR, "metrics.json")
 metrics = json.load(open(metrics_path)) if os.path.exists(metrics_path) else {}
@@ -43,167 +32,176 @@ metrics = json.load(open(metrics_path)) if os.path.exists(metrics_path) else {}
 stats_path = os.path.join(MODEL_DIR, "stats.json")
 stats = json.load(open(stats_path)) if os.path.exists(stats_path) else {}
 
-# ── App ─────────────────────────────────────────────────────────
+CLASS_LABELS = ["Low", "Medium", "High", "Very High"]
+CLASS_ACTIONS = {
+    "Low":       "Normal operations — no surge needed",
+    "Medium":    "Monitor closely — consider pre-positioning drivers",
+    "High":      "Increase driver availability in this zone",
+    "Very High": "Activate surge pricing — critical demand zone",
+}
+
 app = FastAPI(
     title="Ride Demand Prediction API",
-    description=(
-        "End-to-end ML API for predicting NYC ride demand "
-        "by location zone and time. Built with XGBoost + Snowflake + PCA + KMeans."
-    ),
-    version="1.0.0",
+    description="Regression + Classification endpoints for NYC ride demand forecasting.",
+    version="2.0.0",
 )
 
 
-# ── Pydantic models ─────────────────────────────────────────────
 class PredictRequest(BaseModel):
-    location_code: int = Field(..., ge=0, description="Encoded location ID (0–N)")
-    hour:          int = Field(..., ge=0, le=23, description="Hour of day (0–23)")
+    location_code: int = Field(..., ge=0,  description="Encoded location zone ID")
+    hour:          int = Field(..., ge=0, le=23, description="Hour of day (0-23)")
     day_of_week:   int = Field(0,  ge=0, le=6,  description="0=Monday … 6=Sunday")
-    month:         int = Field(6,  ge=1, le=12, description="Month number (1–12)")
-    is_weekend:    int = Field(0,  ge=0, le=1,  description="1 if weekend, else 0")
-    hour_bin:      int = Field(2,  ge=0, le=7,  description="Hour bucket (hour // 3)")
-    cluster:       int = Field(0,  ge=0, le=3,  description="Demand cluster (0–3)")
+    month:         int = Field(6,  ge=1, le=12, description="Month (1-12)")
+    is_weekend:    int = Field(0,  ge=0, le=1,  description="1=weekend, 0=weekday")
+    hour_bin:      int = Field(2,  ge=0, le=7,  description="Hour bucket (hour//3)")
+    cluster:       int = Field(0,  ge=0, le=3,  description="KMeans demand cluster (0-3)")
 
 
-class BatchPredictRequest(BaseModel):
+class BatchRequest(BaseModel):
     inputs: List[PredictRequest]
 
 
-def _predict_one(req: PredictRequest) -> float:
-    features = np.array([[
-        req.location_code,
-        req.hour,
-        req.day_of_week,
-        req.month,
-        req.is_weekend,
-        req.hour_bin,
-        req.cluster,
+def _features(req: PredictRequest):
+    return np.array([[
+        req.location_code, req.hour, req.day_of_week,
+        req.month, req.is_weekend, req.hour_bin, req.cluster
     ]])
-    pred = model.predict(features)
-    return round(float(pred[0]), 1)
 
 
-# ── Routes ──────────────────────────────────────────────────────
+def _interpret_demand(demand: float) -> str:
+    if demand < 5:   return "Very low demand"
+    elif demand < 10: return "Low demand"
+    elif demand < 20: return "Moderate demand"
+    elif demand < 50: return "High demand — increase driver availability"
+    else:             return "Very high demand — surge pricing recommended"
+
+
 @app.get("/")
 def root():
     return {
         "status": "ok",
-        "project": "Ride Demand Prediction System",
-        "model": metrics.get("best_model", "XGBoost"),
-        "features": metrics.get("features", []),
-        "model_metrics": metrics.get("results", {}),
-        "docs": "/docs",
+        "version": "2.0.0",
+        "endpoints": {
+            "regression":     "GET /predict",
+            "classification": "GET /classify",
+            "batch":          "POST /predict/batch",
+            "stats":          "GET /stats",
+            "model_info":     "GET /model-info",
+            "docs":           "GET /docs",
+        }
     }
 
 
 @app.get("/predict")
-def predict(
-    location_code: int,
-    hour:          int,
-    day_of_week:   int = 0,
-    month:         int = 6,
-    is_weekend:    int = 0,
-    hour_bin:      int = 2,
-    cluster:       int = 0,
-):
-    """Predict ride demand for a single location + time combination."""
-    if not (0 <= hour <= 23):
-        raise HTTPException(400, "hour must be 0–23")
+def predict(location_code: int, hour: int, day_of_week: int = 0,
+            month: int = 6, is_weekend: int = 0,
+            hour_bin: int = 2, cluster: int = 0):
+    """REGRESSION — predict exact ride demand count."""
     req = PredictRequest(
-        location_code=location_code,
-        hour=hour,
-        day_of_week=day_of_week,
-        month=month,
-        is_weekend=is_weekend,
-        hour_bin=hour_bin,
-        cluster=cluster,
+        location_code=location_code, hour=hour,
+        day_of_week=day_of_week, month=month,
+        is_weekend=is_weekend, hour_bin=hour_bin, cluster=cluster
     )
-    demand = _predict_one(req)
+    demand = round(float(model.predict(_features(req))[0]), 1)
     return {
-        "location_code": location_code,
-        "hour":          hour,
-        "day_of_week":   day_of_week,
-        "month":         month,
-        "cluster":       cluster,
-        "predicted_demand": demand,
-        "interpretation": _interpret(demand),
+        "type":               "regression",
+        "location_code":      location_code,
+        "hour":               hour,
+        "predicted_demand":   demand,
+        "interpretation":     _interpret_demand(demand),
+    }
+
+
+@app.get("/classify")
+def classify(location_code: int, hour: int, day_of_week: int = 0,
+             month: int = 6, is_weekend: int = 0,
+             hour_bin: int = 2, cluster: int = 0):
+    """CLASSIFICATION — predict demand category with probabilities."""
+    req = PredictRequest(
+        location_code=location_code, hour=hour,
+        day_of_week=day_of_week, month=month,
+        is_weekend=is_weekend, hour_bin=hour_bin, cluster=cluster
+    )
+    X = _features(req)
+    pred_class = int(classifier.predict(X)[0])
+    label = CLASS_LABELS[pred_class]
+
+    proba = {}
+    if hasattr(classifier, "predict_proba"):
+        probs = classifier.predict_proba(X)[0]
+        proba = {CLASS_LABELS[i]: round(float(probs[i]) * 100, 1) for i in range(len(CLASS_LABELS))}
+
+    return {
+        "type":             "classification",
+        "location_code":    location_code,
+        "hour":             hour,
+        "predicted_class":  pred_class,
+        "demand_category":  label,
+        "probabilities_%":  proba,
+        "recommended_action": CLASS_ACTIONS[label],
     }
 
 
 @app.post("/predict/batch")
-def predict_batch(body: BatchPredictRequest):
-    """Predict demand for a list of location/time inputs."""
+def predict_batch(body: BatchRequest):
+    """Batch regression + classification for multiple inputs."""
     if len(body.inputs) > 1000:
-        raise HTTPException(400, "Max 1000 inputs per batch request")
+        raise HTTPException(400, "Max 1000 inputs per batch")
     results = []
     for req in body.inputs:
+        X = _features(req)
+        demand     = round(float(model.predict(X)[0]), 1)
+        pred_class = int(classifier.predict(X)[0])
         results.append({
             "location_code":    req.location_code,
             "hour":             req.hour,
-            "predicted_demand": _predict_one(req),
+            "predicted_demand": demand,
+            "demand_category":  CLASS_LABELS[pred_class],
         })
     return {"count": len(results), "predictions": results}
 
 
 @app.get("/stats")
 def get_stats():
-    """Return dataset statistics computed during training."""
-    if not stats:
-        raise HTTPException(404, "Stats not found. Run model/train.py first.")
-    return stats
-
-
-@app.get("/peak-hours")
-def peak_hours():
-    """Return hardcoded peak-hour insights from the NYC dataset."""
-    return {
-        "top_demand_hours": [17, 18, 19, 20, 21],
-        "low_demand_hours": [3, 4, 5],
-        "peak_days": ["Friday", "Saturday"],
-        "insight": (
-            "Evening hours 17–21 show highest ride demand. "
-            "Friday and Saturday are the busiest days. "
-            "Early morning 3–5 AM has the lowest demand."
-        ),
-    }
+    return stats if stats else {"error": "Run model/train.py first"}
 
 
 @app.get("/model-info")
 def model_info():
-    """Return model metadata, PCA variance, and cluster info."""
-    cluster_path = os.path.join(MODEL_DIR, "cluster_info.json")
-    cluster_info = {}
-    if os.path.exists(cluster_path):
-        cluster_info = json.load(open(cluster_path))
-    pca_variance = pca_model.explained_variance_ratio_.tolist()
+    pca_model = joblib.load(os.path.join(MODEL_DIR, "pca.pkl")) \
+        if os.path.exists(os.path.join(MODEL_DIR, "pca.pkl")) else None
+    pca_variance = {}
+    if pca_model:
+        ev = pca_model.explained_variance_ratio_
+        pca_variance = {"pc1": round(ev[0],4), "pc2": round(ev[1],4),
+                        "total": round(sum(ev),4)}
     return {
-        "best_model":         metrics.get("best_model"),
-        "features":           metrics.get("features"),
-        "results":            metrics.get("results"),
-        "feature_importance": metrics.get("feature_importance"),
-        "pca_explained_variance": {
-            "pc1": round(pca_variance[0], 4),
-            "pc2": round(pca_variance[1], 4),
-            "total_retained": round(sum(pca_variance), 4),
+        "regression": {
+            "best_model":        metrics.get("best_model"),
+            "results":           metrics.get("results"),
+            "feature_importance":metrics.get("feature_importance"),
         },
-        "kmeans_clusters":    cluster_info,
+        "classification": {
+            "best_model":        metrics.get("best_classifier"),
+            "class_labels":      CLASS_LABELS,
+            "demand_thresholds": metrics.get("demand_thresholds"),
+            "results":           metrics.get("classification_results"),
+            "feature_importance":metrics.get("cls_feature_importance"),
+        },
+        "pca_variance": pca_variance,
     }
 
 
-def _interpret(demand: float) -> str:
-    if demand < 2:
-        return "Very low demand — few drivers needed"
-    elif demand < 5:
-        return "Low demand"
-    elif demand < 10:
-        return "Moderate demand"
-    elif demand < 20:
-        return "High demand — increase driver availability"
-    else:
-        return "Very high demand — surge pricing recommended"
+@app.get("/peak-hours")
+def peak_hours():
+    return {
+        "top_demand_hours": [17, 18, 19, 20, 21],
+        "low_demand_hours": [3, 4, 5],
+        "peak_days":        ["Friday", "Saturday"],
+        "insight": "Evening hours 17-21 show highest ride demand. Early morning 3-5 AM is lowest.",
+    }
 
 
-# ── Run ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
