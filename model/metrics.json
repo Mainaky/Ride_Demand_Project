@@ -1,0 +1,152 @@
+{
+  "best_model": "XGBoost_Regressor",
+  "features": [
+    "location_code",
+    "hour",
+    "day_of_week",
+    "month",
+    "is_weekend",
+    "hour_bin",
+    "cluster"
+  ],
+  "class_labels": [
+    "Low",
+    "Medium",
+    "High",
+    "Very High"
+  ],
+  "demand_thresholds": {
+    "p25": 1.0,
+    "p50": 2.0,
+    "p75": 8.0
+  },
+  "results": {
+    "XGBoost_Regressor": {
+      "MAE": 7.9677,
+      "RMSE": 21.2438,
+      "R2": 0.793
+    },
+    "RandomForest_Regressor": {
+      "MAE": 6.6478,
+      "RMSE": 21.7045,
+      "R2": 0.7839
+    }
+  },
+  "feature_importance": {
+    "location_code": 0.4377,
+    "hour": 0.0972,
+    "day_of_week": 0.0534,
+    "month": 0.0223,
+    "is_weekend": 0.0825,
+    "hour_bin": 0.1793,
+    "cluster": 0.1276
+  },
+  "best_classifier": "XGBoost_Classifier",
+  "classification_results": {
+    "XGBoost_Classifier": {
+      "Accuracy": 0.6781,
+      "Precision": 0.6242,
+      "Recall": 0.6781,
+      "F1_Score": 0.6235,
+      "confusion_matrix": [
+        [
+          23112,
+          4,
+          1905,
+          825
+        ],
+        [
+          6112,
+          4,
+          1882,
+          422
+        ],
+        [
+          4405,
+          5,
+          6616,
+          2186
+        ],
+        [
+          620,
+          0,
+          1667,
+          12467
+        ]
+      ]
+    },
+    "RandomForest_Classifier": {
+      "Accuracy": 0.5507,
+      "Precision": 0.4694,
+      "Recall": 0.5507,
+      "F1_Score": 0.4814,
+      "confusion_matrix": [
+        [
+          21116,
+          0,
+          855,
+          3875
+        ],
+        [
+          6182,
+          0,
+          623,
+          1615
+        ],
+        [
+          6440,
+          0,
+          2476,
+          4296
+        ],
+        [
+          3165,
+          0,
+          911,
+          10678
+        ]
+      ]
+    },
+    "LogisticRegression": {
+      "Accuracy": 0.4153,
+      "Precision": 0.1725,
+      "Recall": 0.4153,
+      "F1_Score": 0.2437,
+      "confusion_matrix": [
+        [
+          25846,
+          0,
+          0,
+          0
+        ],
+        [
+          8420,
+          0,
+          0,
+          0
+        ],
+        [
+          13212,
+          0,
+          0,
+          0
+        ],
+        [
+          14754,
+          0,
+          0,
+          0
+        ]
+      ]
+    }
+  },
+  "cls_feature_importance": {
+    "location_code": 0.6851,
+    "hour": 0.0412,
+    "day_of_week": 0.0232,
+    "month": 0.0803,
+    "is_weekend": 0.0279,
+    "hour_bin": 0.0456,
+    "cluster": 0.0967
+  }
+}

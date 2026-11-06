@@ -1,18 +1,33 @@
 """
-FastAPI — Ride Demand Prediction API
-=====================================
-Regression  : /predict        → predicted demand count
-Classification: /classify     → demand category + probabilities
-Batch       : /predict/batch  → multiple predictions at once
-Info        : /stats, /model-info, /peak-hours
+FastAPI — ZonePulse Ride Demand Prediction & Intelligence API
+=============================================================
+Auth           : /auth/signup, /auth/login, /auth/me
+Regression     : /predict        → predicted demand count
+Classification : /classify       → demand category + probabilities
+Batch          : /predict/batch  → multiple predictions at once
+Info           : /stats, /model-info, /peak-hours
+Docs           : /docs           → auto-generated Swagger UI
 """
 
 import os, json
 import numpy as np
 import joblib
-from typing import List
-from fastapi import FastAPI, HTTPException
+from typing import List, Optional
+from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
+
+try:
+    from api.auth import (
+        init_db, register_user, authenticate_user,
+        SignUpRequest, LoginRequest, AuthResponse, decode_token
+    )
+except ImportError:
+    from auth import (
+        init_db, register_user, authenticate_user,
+        SignUpRequest, LoginRequest, AuthResponse, decode_token
+    )
 
 BASE_DIR  = os.path.dirname(__file__)
 MODEL_DIR = os.path.join(BASE_DIR, "..", "model")
@@ -20,7 +35,7 @@ MODEL_DIR = os.path.join(BASE_DIR, "..", "model")
 def _load(name):
     p = os.path.join(MODEL_DIR, name)
     if not os.path.exists(p):
-        raise RuntimeError(f"{name} not found. Run python model/train.py first.")
+        raise RuntimeError(f"{name} not found at {p}. Run python model/train.py first.")
     return joblib.load(p)
 
 model      = _load("model.pkl")
@@ -40,11 +55,38 @@ CLASS_ACTIONS = {
     "Very High": "Activate surge pricing — critical demand zone",
 }
 
+SECURITY = HTTPBearer(auto_error=False)
+
 app = FastAPI(
-    title="Ride Demand Prediction API",
-    description="Regression + Classification endpoints for NYC ride demand forecasting.",
+    title="ZonePulse Ride Demand Prediction API",
+    description="Enterprise REST service for NYC ride-hailing demand forecasting, surge tier classification, and capacity optimization.",
     version="2.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
+
+# CORS Middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.on_event("startup")
+def startup_init():
+    init_db()
+
+
+def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(SECURITY)) -> Optional[dict]:
+    """Optional bearer token validation for endpoints."""
+    if credentials and credentials.scheme.lower() == "bearer":
+        payload = decode_token(credentials.credentials)
+        if payload:
+            return payload
+    return None
 
 
 class PredictRequest(BaseModel):
@@ -69,7 +111,7 @@ def _features(req: PredictRequest):
 
 
 def _interpret_demand(demand: float) -> str:
-    if demand < 5:   return "Very low demand"
+    if demand < 5:    return "Very low demand"
     elif demand < 10: return "Low demand"
     elif demand < 20: return "Moderate demand"
     elif demand < 50: return "High demand — increase driver availability"
@@ -80,8 +122,13 @@ def _interpret_demand(demand: float) -> str:
 def root():
     return {
         "status": "ok",
+        "service": "ZonePulse Ride Demand Prediction API",
         "version": "2.0.0",
         "endpoints": {
+            "health":         "GET /",
+            "auth_signup":    "POST /auth/signup",
+            "auth_login":     "POST /auth/login",
+            "auth_me":        "GET /auth/me",
             "regression":     "GET /predict",
             "classification": "GET /classify",
             "batch":          "POST /predict/batch",
@@ -91,6 +138,33 @@ def root():
         }
     }
 
+
+# ── Auth Endpoints ───────────────────────────────────────────────
+
+@app.post("/auth/signup", response_model=AuthResponse)
+def signup(req: SignUpRequest):
+    try:
+        return register_user(req)
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err))
+
+
+@app.post("/auth/login", response_model=AuthResponse)
+def login(req: LoginRequest):
+    try:
+        return authenticate_user(req)
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(err))
+
+
+@app.get("/auth/me")
+def me(user: Optional[dict] = Depends(get_current_user)):
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Valid token required")
+    return {"username": user.get("sub"), "role": user.get("role")}
+
+
+# ── Prediction Endpoints ─────────────────────────────────────────
 
 @app.get("/predict")
 def predict(location_code: int, hour: int, day_of_week: int = 0,

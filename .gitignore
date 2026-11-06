@@ -10,23 +10,17 @@ build/
 venv/
 env/
 
-# Data (raw CSVs — too large for git)
+# Raw Data (Too large for GitHub — >600MB)
 data/raw/
-data/processed/*.csv
+data/processed/spatial_raw.csv
+data/processed/other_carriers_demand.csv
+data/processed/foil_aggregate.csv
+data/processed/fhv_aggregate.csv
 data/processed/*.png
 
-# Model artefacts (regenerate from train.py)
-model/model.pkl
-model/classifier.pkl
-model/label_encoder.pkl
-model/scaler.pkl
-model/pca.pkl
-model/kmeans.pkl
-model/metrics.json
-model/stats.json
-model/cluster_info.json
-
-# Secrets
+# Ignore local database and secrets
+api/*.db
+*.db
 .env
 *.pem
 *.key

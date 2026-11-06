@@ -1,0 +1,19 @@
+{
+  "demand_mean": 15.38,
+  "demand_median": 2.0,
+  "demand_std": 47.21,
+  "demand_variance": 2228.42,
+  "demand_skewness": 7.4279,
+  "demand_kurtosis": 80.0785,
+  "demand_min": 1,
+  "demand_max": 1152,
+  "total_records": 311156,
+  "unique_locations": 2599,
+  "correlations": {
+    "hour": 0.0795,
+    "day_of_week": -0.0192,
+    "month": 0.012,
+    "is_weekend": -0.0363,
+    "hour_bin": 0.08
+  }
+}

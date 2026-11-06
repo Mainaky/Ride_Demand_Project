@@ -1,235 +1,153 @@
-# Ride Demand Prediction System
-### Uber/Ola · NYC · Data Engineering + ML + Full-Stack
+# ZonePulse: Ride Demand Prediction & Surge Pricing System
+### Uber/Ola · NYC · Data Engineering + Machine Learning + Full-Stack Cloud Deployment
 
-> End-to-end system that processes 3M+ raw NYC ride records, stores them in Snowflake, predicts ride demand using XGBoost + PCA + KMeans, and serves predictions through a FastAPI REST endpoint and an interactive Streamlit dashboard.
+> Production-grade demand forecasting and fleet intelligence system. Processes 4.7M+ raw NYC ride-hailing records across heterogeneous schemas, loads data into Snowflake cloud data warehouse, predicts zone-hour ride demand using XGBoost + PCA + KMeans, and serves real-time predictions via an authenticated FastAPI REST microservice and an interactive Streamlit dashboard.
 
 ---
 
-## Architecture
+## 🏛️ System Architecture
 
-```
-14 raw CSV files (3M+ rows)
-        │
-        ▼
-  ETL pipeline (etl/etl.py)
-  ─────────────────────────
-  · Handles 4 different CSV schemas
-  · Cleans, parses datetimes, extracts features
-  · Aggregates demand per location × hour
-        │
-        ▼
-  processed.csv (data/processed/)
-        │
-        ├──────────────────────────────────────┐
-        ▼                                      ▼
-  Snowflake DWH                         ML Pipeline (model/train.py)
-  ─────────────                         ─────────────────────────────
-  · UBER_PROJECT.PUBLIC.RIDE_DATA       · Statistical analysis
-  · SQL peak-hour analytics             · PCA (dimensionality reduction)
-  · SQL top-location queries            · KMeans (demand clustering, k=4)
-                                        · XGBoost / RandomForest
-                                        · MAE, RMSE, R² evaluation
-                                        · Saves model.pkl + encoders
-                                               │
-                          ┌────────────────────┘
-                          │
-              ┌───────────┼───────────┐
-              ▼                       ▼
-      FastAPI (api/app.py)    Streamlit (dashboard/app.py)
-      ──────────────────      ─────────────────────────────
-      · /predict endpoint     · 6 interactive charts
-      · /batch endpoint       · PCA cluster scatter
-      · /stats, /model-info   · Feature importance
-      · Swagger UI at /docs   · Live prediction widget
+```text
+               ┌────────────────────────────────────────────────────────┐
+               │              CLIENT / WEB BROWSER                      │
+               │  Streamlit UI (Port 8501 / Render Web Service)         │
+               └──────────────────────────┬─────────────────────────────┘
+                                          │
+                  HTTPS Requests / Bearer JWT Authentication
+                                          │
+                                          ▼
+               ┌────────────────────────────────────────────────────────┐
+               │              BACKEND REST MICROSERVICE                 │
+               │  FastAPI (Port 8000 / Render Web Service)              │
+               ├──────────────────────────┬─────────────────────────────┤
+               │  • /auth/signup          │  • /predict (Regression)    │
+               │  • /auth/login           │  • /classify (Surge Tier)   │
+               │  • /auth/me              │  • /predict/batch (x1000)   │
+               │  • /stats & /model-info  │  • /docs (OpenAPI Swagger)  │
+               └─────────────┬────────────────────────────┬─────────────┘
+                             │                            │
+                             ▼                            ▼
+               ┌──────────────────────────┐  ┌──────────────────────────┐
+               │    SQLITE AUTH STORE     │  │   SNOWFLAKE CLOUD DWH    │
+               │   api/users.db (PBKDF2)  │  │   UBER_PROJECT.RIDE_DATA │
+               │   Salted Passwords & JWT │  │   write_pandas Ingestion │
+               └──────────────────────────┘  └──────────────────────────┘
 ```
 
 ---
 
-## Dataset
+## 🌟 Key Features
 
-| File | Rows | Type |
-|------|------|------|
-| uber-raw-data-apr14.csv | ~564K | Uber pickups (Lat/Lon) |
-| uber-raw-data-may14.csv | ~652K | Uber pickups (Lat/Lon) |
-| uber-raw-data-jun14.csv | ~663K | Uber pickups (Lat/Lon) |
-| other-Lyft_B02510.csv | ~267K | Lyft pickups (Lat/Lon) |
-| other-Carmel/Diplo/American/etc. | ~1.1M | Other FHV (address only) |
-| Uber-Jan-Feb-FOIL.csv | ~354 | Aggregate trip counts |
-| other-FHV-services.csv | ~26K | Aggregate FHV stats |
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Data Engineering | Python · Pandas · Snowflake · SQL |
-| ML | XGBoost · Scikit-learn · PCA · KMeans |
-| API | FastAPI · Uvicorn · Pydantic |
-| Dashboard | Streamlit · Plotly |
-| Storage | Snowflake cloud DWH |
-| Versioning | Git · GitHub |
+1. **Enterprise User Authentication:**
+   - **User Sign-Up:** Secure registration with email validation and PBKDF2-HMAC-SHA256 salted password hashing.
+   - **User Login:** Issues tamper-evident signed JWT bearer tokens with 7-day expiration.
+   - **1-Click Recruiter Demo:** Instant guest review access without manual form entry.
+2. **Dual Machine Learning Engine:**
+   - **Regression Track (XGBoost):** Explains **79.3% of demand variance** ($R^2 = 0.7930$, $\text{MAE} = 7.97$ rides) to forecast exact ride counts for driver capacity sizing.
+   - **Classification Track (XGBoost):** Categorizes demand into 4 operational tiers (**Low**, **Medium**, **High**, **Very High**) with **67.8% accuracy** to trigger automated surge multipliers.
+3. **Unsupervised Intelligence:**
+   - **PCA (Principal Component Analysis):** Projects 5-dimensional feature space onto 2 principal components for interactive 2D cluster inspection.
+   - **K-Means Clustering ($k=4$):** Segments zones into behavioral groups and feeds cluster labels back into XGBoost as augmented features.
+4. **Snowflake Cloud Data Warehouse:**
+   - Staged bulk loading using `write_pandas` and analytical SQL queries identifying evening peak commute windows (17:00–21:00) and spatial corridors.
+5. **Production Deployment Ready:**
+   - Multi-service `render.yaml` Blueprint for 1-click cloud deployment on Render.
 
 ---
 
-## Quick Start
+## 🚀 Local Quickstart
 
-### 1. Install dependencies
+### 1. Prerequisites
+- Python 3.10+ (tested on Python 3.11).
+
+### 2. Install Dependencies
 ```bash
+python -m venv .venv
+
+# Windows PowerShell:
+.venv\Scripts\Activate.ps1
+
+# macOS/Linux:
+source .venv/bin/activate
+
 pip install -r requirements.txt
 ```
 
-### 2. Place raw CSV files
-```
-data/raw/
-  uber-raw-data-apr14.csv
-  uber-raw-data-may14.csv
-  uber-raw-data-jun14.csv
-  other-Lyft_B02510.csv
-  other-American_B01362.csv
-  ... (all 14 files)
-```
-
-### 3. Run the full pipeline
-```bash
-python run.py
-```
-This runs ETL → ML training → EDA plots in one go.
-
-Or run steps individually:
-```bash
-python etl/etl.py        # Step 1: ETL
-python model/train.py    # Step 2: ML training
-python notebooks/eda_analysis.py  # Step 3: EDA plots
-```
-
-### 4. Start the API
-```bash
+### 3. Start Backend API (Terminal 1)
+```powershell
 cd api
-uvicorn app:app --reload
+uvicorn app:app --reload --host 127.0.0.1 --port 8000
 ```
-Open **http://localhost:8000/docs** for the Swagger UI.
+* Interactive Swagger Docs: `http://127.0.0.1:8000/docs`
+* API Root Health: `http://127.0.0.1:8000/`
 
-### 5. Start the dashboard
-```bash
+### 4. Start Frontend Dashboard (Terminal 2)
+```powershell
 cd dashboard
 streamlit run app.py
 ```
-
-### 6. Snowflake setup (optional)
-```bash
-# Copy and fill in your credentials
-cp .env.example .env
-
-# Run setup + upload
-python snowflake/connection.py
-```
+* Dashboard will automatically open in your browser at `http://localhost:8501`.
 
 ---
 
-## API Reference
+## ☁️ Deploying to Render
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Health check + model info |
-| `/predict` | GET | Single demand prediction |
-| `/predict/batch` | POST | Batch predictions (max 1000) |
-| `/stats` | GET | Dataset statistics |
-| `/peak-hours` | GET | Peak demand hours |
-| `/model-info` | GET | Model metrics + PCA variance + clusters |
-| `/docs` | GET | Auto-generated Swagger UI |
+This repository includes a `render.yaml` Blueprint for 1-click cloud deployment.
 
-Example:
-```
-GET /predict?location_code=100&hour=18&day_of_week=4&month=6&cluster=2
-```
-Response:
-```json
-{
-  "location_code": 100,
-  "hour": 18,
-  "predicted_demand": 14.3,
-  "interpretation": "High demand — increase driver availability"
-}
-```
+### Option A: Render Blueprint (Recommended)
+1. Push this repository to GitHub: `https://github.com/Mainaky/Ride_Demand_Project`.
+2. Open your [Render Dashboard](https://dashboard.render.com).
+3. Click **New +** $\rightarrow$ **Blueprint**.
+4. Select `Ride_Demand_Project`.
+5. Render will automatically provision both:
+   - `zonepulse-api` (FastAPI backend)
+   - `zonepulse-dashboard` (Streamlit UI)
+6. Once deployed, open the public URL of `zonepulse-dashboard` to view the live app!
 
 ---
 
-## Model Performance
+## 📈 Model Performance Benchmark
 
-| Model | MAE | RMSE | R² |
-|-------|-----|------|----|
-| XGBoost | ~3–8 | ~12–18 | ~0.82–0.91 |
-| RandomForest | ~4–10 | ~14–20 | ~0.78–0.87 |
-
-*Results vary by month/filter applied during training.*
-
----
-
-## Key Insights (from SQL + EDA)
-
-- Peak demand hours: **17:00–21:00** (evening commute)
-- Lowest demand: **03:00–05:00** (early morning)
-- Busiest days: **Friday and Saturday**
-- Top demand zones: Midtown Manhattan, JFK/LGA airport corridors
-- Weekend demand peaks ~2 hours later than weekdays
+| Model | Task | Metric 1 | Metric 2 | R² / F1 |
+| :--- | :--- | :--- | :--- | :--- |
+| **XGBoost Regressor (Best)** | Continuous Demand Count | MAE: 7.97 rides | RMSE: 21.24 | **R²: 0.7930 (79.3%)** |
+| **Random Forest Regressor** | Continuous Demand Count | MAE: 6.65 rides | RMSE: 21.70 | **R²: 0.7839 (78.4%)** |
+| **XGBoost Classifier (Best)** | Surge Tier Classification | Accuracy: 67.8% | Precision: 62.4% | **Weighted F1: 0.6235** |
+| **Random Forest Classifier** | Surge Tier Classification | Accuracy: 55.1% | Precision: 46.9% | **Weighted F1: 0.4814** |
 
 ---
 
-## Project Structure
+## 📂 Repository Structure
 
-```
-ride-demand-project/
-├── data/
-│   ├── raw/                     ← Place all 14 CSVs here
-│   └── processed/               ← Generated by ETL
-│       ├── processed.csv
-│       ├── spatial_raw.csv
-│       ├── other_carriers_demand.csv
-│       └── plot_*.png
-├── etl/
-│   └── etl.py                   ← Full ETL pipeline
-├── model/
-│   ├── train.py                 ← ML training pipeline
-│   ├── model.pkl                ← Generated by train.py
-│   ├── label_encoder.pkl
-│   ├── scaler.pkl
-│   ├── pca.pkl
-│   ├── kmeans.pkl
-│   ├── metrics.json
-│   └── stats.json
+```text
+Ride_Demand_Project/
 ├── api/
-│   └── app.py                   ← FastAPI app
+│   ├── app.py             ← FastAPI REST service (Regression, Classification, Batch)
+│   ├── auth.py            ← User authentication & SQLite token manager
+│   └── users.db           ← Auto-generated persistent user database
 ├── dashboard/
-│   └── app.py                   ← Streamlit dashboard
-├── snowflake/
-│   └── connection.py            ← Snowflake client
+│   └── app.py             ← 4-tab Streamlit dashboard with login/signup gate
+├── data/
+│   └── processed/
+│       └── processed.csv  ← 311,156 model-ready aggregated zone-hour records (8.3 MB)
+├── etl/
+│   └── etl.py             ← 4-schema ETL ingestion, NYC bounding box, 1.1km grid
+├── model/
+│   ├── train.py           ← Dual-track ML training pipeline (PCA, KMeans, XGBoost, RF)
+│   ├── model.pkl          ← Trained XGBoost Regressor
+│   ├── classifier.pkl     ← Trained XGBoost Classifier
+│   ├── kmeans.pkl         ← Trained KMeans clustering model (k=4)
+│   ├── pca.pkl            ← Trained 2D PCA projector
+│   ├── scaler.pkl         ← Feature standardizer
+│   ├── label_encoder.pkl  ← Zone encoder
+│   ├── metrics.json       ← Evaluation metrics & feature importances
+│   └── stats.json         ← Dataset descriptive statistics
 ├── notebooks/
-│   └── eda_analysis.py          ← EDA + visualisations
-├── run.py                       ← Master pipeline runner
-├── requirements.txt
-├── .env.example
-├── .gitignore
+│   └── eda_analysis.py    ← 7 exploratory data analysis visualization scripts
+├── snowflake/
+│   └── connection.py      ← Snowflake cloud data warehouse client & SQL analytics
+├── render.yaml            ← 1-click Render cloud deployment blueprint
+├── requirements.txt       ← Python dependencies
+├── .gitignore             ← Clean ignore rules (excludes >600MB raw data)
 └── README.md
 ```
-
----
-
-## Resume Description
-
-**Ride Demand Prediction System** · Python · XGBoost · Snowflake · PCA · FastAPI · Streamlit
-
-- Built an end-to-end demand forecasting pipeline processing 3M+ Uber/FHV trip records across 14 raw CSV files with 4 different schemas, engineering spatio-temporal features including location grids, hourly bins, and weekend indicators.
-- Integrated Snowflake as a cloud data warehouse, loading processed data via Python and running SQL analytics to surface peak-demand hours and highest-density ride zones.
-- Applied PCA for dimensionality reduction (95%+ variance retained in 2 components) and KMeans clustering to segment demand into 4 behavioural groups, using cluster labels as additional XGBoost features.
-- Deployed a FastAPI prediction service with auto-generated Swagger docs and an interactive Streamlit dashboard with hourly trend charts, PCA cluster scatter, feature importance, and a live prediction widget.
-
----
-
-## Interview One-Liner
-
-> "I built an end-to-end ride demand prediction system — 14 raw CSVs across multiple schemas were combined in an ETL pipeline and pushed into Snowflake as a cloud warehouse. On the ML side I used PCA to reduce feature dimensions, KMeans to segment demand zones, and XGBoost to predict demand by location and time. The whole thing is served by a FastAPI REST endpoint and a live Streamlit dashboard."
-
----
-
-*Data source: NYC Uber/FHV pickup dataset (2014–2015) · For placement portfolio use*
