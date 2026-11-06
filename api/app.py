@@ -1,6 +1,7 @@
 """
-FastAPI — ZonePulse Ride Demand Prediction & Intelligence API
-=============================================================
+FastAPI — ZonePulse Ride Demand Prediction & Real-Time Ride Booking API
+=======================================================================
+Ride Booking   : /ride/quote, /ride/book, /ride/history, /landmarks
 Auth           : /auth/signup, /auth/login, /auth/me
 Regression     : /predict        → predicted demand count
 Classification : /classify       → demand category + probabilities
@@ -23,10 +24,18 @@ try:
         init_db, register_user, authenticate_user,
         SignUpRequest, LoginRequest, AuthResponse, decode_token
     )
+    from api.ride_service import (
+        compute_ride_quote, save_booking, get_bookings,
+        NYC_LANDMARKS, init_booking_db
+    )
 except ImportError:
     from auth import (
         init_db, register_user, authenticate_user,
         SignUpRequest, LoginRequest, AuthResponse, decode_token
+    )
+    from ride_service import (
+        compute_ride_quote, save_booking, get_bookings,
+        NYC_LANDMARKS, init_booking_db
     )
 
 BASE_DIR  = os.path.dirname(__file__)
@@ -58,9 +67,9 @@ CLASS_ACTIONS = {
 SECURITY = HTTPBearer(auto_error=False)
 
 app = FastAPI(
-    title="ZonePulse Ride Demand Prediction API",
-    description="Enterprise REST service for NYC ride-hailing demand forecasting, surge tier classification, and capacity optimization.",
-    version="2.0.0",
+    title="ZonePulse Ride Demand & Booking API",
+    description="Enterprise REST service for ride availability calculation, dynamic surge pricing, ML demand forecasting, and real-time ride booking.",
+    version="2.5.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -78,10 +87,10 @@ app.add_middleware(
 @app.on_event("startup")
 def startup_init():
     init_db()
+    init_booking_db()
 
 
 def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(SECURITY)) -> Optional[dict]:
-    """Optional bearer token validation for endpoints."""
     if credentials and credentials.scheme.lower() == "bearer":
         payload = decode_token(credentials.credentials)
         if payload:
@@ -89,6 +98,40 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
     return None
 
 
+# ── Consumer Ride Booking Schemas ─────────────────────────────────────────────
+class RideQuoteRequest(BaseModel):
+    passenger_name: str = Field(default="Valued Passenger")
+    pickup_address: str = Field(default="Times Square, Manhattan")
+    pickup_lat: float = Field(ge=40.4, le=41.2)
+    pickup_lon: float = Field(ge=-74.4, le=-73.6)
+    dropoff_address: str = Field(default="JFK International Airport (Terminal 4)")
+    dropoff_lat: float = Field(ge=40.4, le=41.2)
+    dropoff_lon: float = Field(ge=-74.4, le=-73.6)
+    hour: int = Field(default=18, ge=0, le=23)
+    day_of_week: int = Field(default=4, ge=0, le=6)
+
+
+class RideBookingRequest(BaseModel):
+    passenger_name: str
+    phone: Optional[str] = "+1 (212) 555-0199"
+    pickup_address: str
+    pickup_lat: float
+    pickup_lon: float
+    dropoff_address: str
+    dropoff_lat: float
+    dropoff_lon: float
+    distance_km: float
+    duration_mins: int
+    ride_tier: str = "Standard (UberX/Mini)"
+    fare: float
+    driver_name: Optional[str] = "Michael A."
+    driver_rating: Optional[float] = 4.95
+    car_model: Optional[str] = "Toyota Camry Hybrid"
+    car_plate: Optional[str] = "TLC #7K82"
+    eta_mins: Optional[int] = 3
+
+
+# ── Operational ML Schemas ────────────────────────────────────────────────────
 class PredictRequest(BaseModel):
     location_code: int = Field(..., ge=0,  description="Encoded location zone ID")
     hour:          int = Field(..., ge=0, le=23, description="Hour of day (0-23)")
@@ -122,10 +165,14 @@ def _interpret_demand(demand: float) -> str:
 def root():
     return {
         "status": "ok",
-        "service": "ZonePulse Ride Demand Prediction API",
-        "version": "2.0.0",
+        "service": "ZonePulse Ride Demand & Booking API",
+        "version": "2.5.0",
         "endpoints": {
             "health":         "GET /",
+            "landmarks":      "GET /landmarks",
+            "ride_quote":     "POST /ride/quote",
+            "ride_book":      "POST /ride/book",
+            "ride_history":   "GET /ride/history",
             "auth_signup":    "POST /auth/signup",
             "auth_login":     "POST /auth/login",
             "auth_me":        "GET /auth/me",
@@ -139,7 +186,55 @@ def root():
     }
 
 
-# ── Auth Endpoints ───────────────────────────────────────────────
+# ── Consumer Ride Booking Endpoints ───────────────────────────────────────────
+
+@app.get("/landmarks")
+def list_landmarks():
+    """Return pre-mapped NYC landmarks with exact latitude and longitude."""
+    return [
+        {"name": name, "lat": coords[0], "lon": coords[1]}
+        for name, coords in NYC_LANDMARKS.items()
+    ]
+
+
+@app.post("/ride/quote")
+def quote_ride(req: RideQuoteRequest):
+    """
+    Calculates probability of finding a car in the requested area and distance,
+    estimated wait time, ML predicted demand, surge tier, fare options, and nearby drivers.
+    """
+    quote = compute_ride_quote(
+        pickup_lat=req.pickup_lat,
+        pickup_lon=req.pickup_lon,
+        dropoff_lat=req.dropoff_lat,
+        dropoff_lon=req.dropoff_lon,
+        hour=req.hour,
+        day_of_week=req.day_of_week,
+    )
+    quote["passenger_name"] = req.passenger_name
+    quote["pickup_address"] = req.pickup_address
+    quote["dropoff_address"] = req.dropoff_address
+    return quote
+
+
+@app.post("/ride/book")
+def book_ride(req: RideBookingRequest):
+    """Confirm and persist a ride booking."""
+    booking_record = save_booking(req.model_dump())
+    return {
+        "status": "Booking Confirmed",
+        "message": f"Your ride has been confirmed! Driver {req.driver_name} is arriving in {req.eta_mins} minutes.",
+        "booking": booking_record,
+    }
+
+
+@app.get("/ride/history")
+def ride_history(passenger_name: Optional[str] = None):
+    """Retrieve historical booked trips."""
+    return get_bookings(passenger_name)
+
+
+# ── Auth Endpoints ────────────────────────────────────────────────────────────
 
 @app.post("/auth/signup", response_model=AuthResponse)
 def signup(req: SignUpRequest):
@@ -164,7 +259,7 @@ def me(user: Optional[dict] = Depends(get_current_user)):
     return {"username": user.get("sub"), "role": user.get("role")}
 
 
-# ── Prediction Endpoints ─────────────────────────────────────────
+# ── Prediction Endpoints ──────────────────────────────────────────────────────
 
 @app.get("/predict")
 def predict(location_code: int, hour: int, day_of_week: int = 0,
