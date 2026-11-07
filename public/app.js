@@ -151,6 +151,7 @@ function renderPlanner() {
       updateRouteLabel();
       clearTimeout(state.searchTimers?.[kind]);
       const query = input.value.trim(); const results = document.querySelector(`#${kind}-results`);
+      results.classList.remove("is-selected");
       if (query.length < 3) { results.innerHTML = query ? '<div class="suggestion-empty">Type at least three characters to search worldwide.</div>' : ""; return; }
       results.innerHTML = '<div class="suggestion-empty">Searching worldwide places…</div>';
       state.searchTimers ||= {}; state.searchTimers[kind] = setTimeout(() => searchPlaces(kind), 350);
@@ -163,6 +164,7 @@ function renderPlanner() {
 async function searchPlaces(kind) {
   clearTimeout(state.searchTimers?.[kind]);
   const query = document.querySelector(`#${kind}-search`).value.trim(); const results = document.querySelector(`#${kind}-results`);
+  results.classList.remove("is-selected");
   if (query.length < 3) { results.innerHTML = '<div class="suggestion-empty">Enter at least three characters.</div>'; return; }
   state.searchSequence ||= {};
   const requestSequence = state.searchSequence[kind] = (state.searchSequence[kind] || 0) + 1;
@@ -182,8 +184,10 @@ async function searchPlaces(kind) {
 async function selectPlace(kind, index) {
   const place = state.places[kind][index]; if (!place) return;
   state.places[kind] = [place]; document.querySelector(`#${kind}-search`).value = place.label;
-  document.querySelector(`#${kind}-results`).innerHTML = `<div class="selected-place">${icon("check",16)} ${esc(place.label)} <button class="clear-place" data-clear="${kind}" title="Clear">×</button></div>`;
-  document.querySelector(`[data-clear="${kind}"]`).addEventListener("click", () => { state.places[kind] = []; document.querySelector(`#${kind}-search`).value = ""; document.querySelector(`#${kind}-results`).innerHTML = ""; if (kind === "pickup") { state.weather = null; renderWeather(); } updateRouteLabel(); });
+  const results = document.querySelector(`#${kind}-results`);
+  results.classList.add("is-selected");
+  results.innerHTML = `<div class="selected-place">${icon("check",16)}<span>${esc(place.label)}</span><button class="clear-place" data-clear="${kind}" title="Clear" aria-label="Clear ${kind} location">×</button></div>`;
+  document.querySelector(`[data-clear="${kind}"]`).addEventListener("click", () => { state.places[kind] = []; document.querySelector(`#${kind}-search`).value = ""; results.classList.remove("is-selected"); results.innerHTML = ""; if (kind === "pickup") { state.weather = null; renderWeather(); } updateRouteLabel(); });
   updateRouteLabel();
   if (kind === "pickup") await loadWeather(place);
 }

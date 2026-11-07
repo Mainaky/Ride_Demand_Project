@@ -1,0 +1,115 @@
+/* Keep confirmed locations in the planner's normal document flow. */
+.suggestions.is-selected {
+  position: static;
+  max-height: none;
+  overflow: visible;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.suggestions.is-selected .selected-place {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid #e0eee8;
+  border-radius: 8px;
+  background: #f1f8f4;
+  color: #26786a;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.suggestions.is-selected .selected-place > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.suggestions.is-selected .clear-place {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+.suggestions.is-selected .clear-place:hover {
+  background: #e4f1eb;
+  color: #286b60;
+}
+
+@media (max-width: 720px) {
+  .planner-card,
+  .planner-aside {
+    min-width: 0;
+  }
+
+  .planner-card .card-heading {
+    align-items: flex-start;
+  }
+
+  .place-field {
+    margin-top: 20px;
+  }
+
+  .search-box {
+    min-width: 0;
+    height: 48px;
+    gap: 8px;
+    padding: 0 10px;
+  }
+
+  .search-box input {
+    min-width: 0;
+    font-size: 14px;
+  }
+
+  .search-action {
+    display: grid;
+    min-width: 36px;
+    min-height: 38px;
+    place-items: center;
+  }
+
+  .suggestions:not(:empty):not(.is-selected) {
+    top: 72px;
+    max-height: min(250px, 45vh);
+  }
+
+  .suggestions .suggestion {
+    min-height: 44px;
+  }
+
+  .selected-route,
+  .weather-failure,
+  .weather-loading {
+    overflow-wrap: anywhere;
+  }
+
+  .weather-failure,
+  .weather-loading {
+    line-height: 1.5;
+  }
+}
+
+@media (max-width: 420px) {
+  .planner-card {
+    padding: 14px;
+  }
+
+  .step-tag {
+    white-space: nowrap;
+  }
+
+  .planner-card .card-heading h2 {
+    font-size: 16px;
+  }
+
+  .weather-time {
+    align-items: flex-start;
+  }
+}
