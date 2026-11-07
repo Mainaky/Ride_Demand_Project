@@ -1,12 +1,11 @@
 services:
-  # ── Backend: FastAPI ML & Auth Service ─────────────────────────────────────
   - type: web
     name: zonepulse-api
     runtime: python
     plan: free
     region: singapore
     branch: main
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements-api.txt
     startCommand: uvicorn api.app:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /
     autoDeployTrigger: commit
@@ -16,14 +15,13 @@ services:
       - key: JWT_SECRET_KEY
         generateValue: true
 
-  # ── Frontend: Streamlit Interactive UI ──────────────────────────────────────
   - type: web
     name: zonepulse-dashboard
     runtime: python
     plan: free
     region: singapore
     branch: main
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements-dashboard.txt
     startCommand: streamlit run dashboard/app.py --server.address 0.0.0.0 --server.port $PORT --server.headless true
     healthCheckPath: /_stcore/health
     autoDeployTrigger: commit
