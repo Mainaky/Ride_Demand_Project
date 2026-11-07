@@ -15,7 +15,6 @@ import numpy as np
 import joblib
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, Depends, status
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
@@ -74,16 +73,6 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS Middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
 @app.on_event("startup")
 def startup_init():
     init_db()
@@ -96,6 +85,11 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
         if payload:
             return payload
     return None
+
+def require_current_user(user: Optional[dict] = Depends(get_current_user)) -> dict:
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sign in to continue")
+    return user
 
 
 # ── Consumer Ride Booking Schemas ─────────────────────────────────────────────
@@ -198,7 +192,7 @@ def list_landmarks():
 
 
 @app.post("/ride/quote")
-def quote_ride(req: RideQuoteRequest):
+def quote_ride(req: RideQuoteRequest, user: dict = Depends(require_current_user)):
     """
     Calculates probability of finding a car in the requested area and distance,
     estimated wait time, ML predicted demand, surge tier, fare options, and nearby drivers.
@@ -218,9 +212,11 @@ def quote_ride(req: RideQuoteRequest):
 
 
 @app.post("/ride/book")
-def book_ride(req: RideBookingRequest):
-    """Confirm and persist a ride booking."""
-    booking_record = save_booking(req.model_dump())
+def book_ride(req: RideBookingRequest, user: dict = Depends(require_current_user)):
+    """Confirm and persist a ride booking for the signed-in account."""
+    booking_data = req.model_dump()
+    booking_data["passenger_name"] = user["sub"]
+    booking_record = save_booking(booking_data)
     return {
         "status": "Booking Confirmed",
         "message": f"Your ride has been confirmed! Driver {req.driver_name} is arriving in {req.eta_mins} minutes.",
@@ -229,9 +225,9 @@ def book_ride(req: RideBookingRequest):
 
 
 @app.get("/ride/history")
-def ride_history(passenger_name: Optional[str] = None):
-    """Retrieve historical booked trips."""
-    return get_bookings(passenger_name)
+def ride_history(user: dict = Depends(require_current_user)):
+    """Retrieve only the signed-in user's historical bookings."""
+    return get_bookings(user["sub"])
 
 
 # ── Auth Endpoints ────────────────────────────────────────────────────────────
@@ -264,7 +260,8 @@ def me(user: Optional[dict] = Depends(get_current_user)):
 @app.get("/predict")
 def predict(location_code: int, hour: int, day_of_week: int = 0,
             month: int = 6, is_weekend: int = 0,
-            hour_bin: int = 2, cluster: int = 0):
+            hour_bin: int = 2, cluster: int = 0,
+            user: dict = Depends(require_current_user)):
     """REGRESSION — predict exact ride demand count."""
     req = PredictRequest(
         location_code=location_code, hour=hour,
@@ -284,7 +281,8 @@ def predict(location_code: int, hour: int, day_of_week: int = 0,
 @app.get("/classify")
 def classify(location_code: int, hour: int, day_of_week: int = 0,
              month: int = 6, is_weekend: int = 0,
-             hour_bin: int = 2, cluster: int = 0):
+             hour_bin: int = 2, cluster: int = 0,
+             user: dict = Depends(require_current_user)):
     """CLASSIFICATION — predict demand category with probabilities."""
     req = PredictRequest(
         location_code=location_code, hour=hour,
@@ -312,7 +310,7 @@ def classify(location_code: int, hour: int, day_of_week: int = 0,
 
 
 @app.post("/predict/batch")
-def predict_batch(body: BatchRequest):
+def predict_batch(body: BatchRequest, user: dict = Depends(require_current_user)):
     """Batch regression + classification for multiple inputs."""
     if len(body.inputs) > 1000:
         raise HTTPException(400, "Max 1000 inputs per batch")
@@ -331,12 +329,12 @@ def predict_batch(body: BatchRequest):
 
 
 @app.get("/stats")
-def get_stats():
+def get_stats(user: dict = Depends(require_current_user)):
     return stats if stats else {"error": "Run model/train.py first"}
 
 
 @app.get("/model-info")
-def model_info():
+def model_info(user: dict = Depends(require_current_user)):
     pca_model = joblib.load(os.path.join(MODEL_DIR, "pca.pkl")) \
         if os.path.exists(os.path.join(MODEL_DIR, "pca.pkl")) else None
     pca_variance = {}
@@ -362,7 +360,7 @@ def model_info():
 
 
 @app.get("/peak-hours")
-def peak_hours():
+def peak_hours(user: dict = Depends(require_current_user)):
     return {
         "top_demand_hours": [17, 18, 19, 20, 21],
         "low_demand_hours": [3, 4, 5],

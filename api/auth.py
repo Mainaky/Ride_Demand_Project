@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -16,8 +17,9 @@ from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
 LOGGER = logging.getLogger("zonepulse_auth")
-DB_PATH = Path(__file__).resolve().parents[1] / "api" / "users.db"
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "zonepulse-secret-key-production-2026")
+DATA_DIR = Path(os.getenv("ZONEPULSE_DATA_DIR", str(Path(__file__).resolve().parent)))
+DB_PATH = Path(os.getenv("USER_DB_PATH", str(DATA_DIR / "users.db")))
+SECRET_KEY = os.getenv("JWT_SECRET_KEY") or secrets.token_hex(32)
 
 
 def init_db() -> None:
@@ -55,32 +57,33 @@ def verify_password(password: str, stored_hash: str) -> bool:
 
 
 def create_token(username: str, role: str) -> str:
-    """Create a tamper-evident signed bearer token with expiration (7 days)."""
+    """Create an HMAC-SHA256 signed bearer token with a 7-day expiration."""
     payload = {
         "sub": username,
         "role": role,
         "exp": int(time.time()) + (7 * 86400),
     }
-    payload_str = json.dumps(payload, separators=(",", ":"))
-    payload_b64 = secrets.token_urlsafe(8)
-    raw_to_sign = f"{payload_str}.{payload_b64}"
-    sig = hmac.new(SECRET_KEY.encode(), raw_to_sign.encode(), hashlib.sha256).hexdigest()
-    return f"{secrets.token_hex(4)}.{sig}.{payload_str.encode('utf-8').hex()}"
+    payload_json = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    payload_part = base64.urlsafe_b64encode(payload_json).decode("ascii").rstrip("=")
+    signature = hmac.new(SECRET_KEY.encode("utf-8"), payload_part.encode("ascii"), hashlib.sha256).digest()
+    signature_part = base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
+    return f"{payload_part}.{signature_part}"
 
 
 def decode_token(token: str) -> Optional[dict]:
-    """Verify and decode a signed token."""
+    """Verify the HMAC signature and expiry before accepting a token."""
     try:
-        parts = token.split(".")
-        if len(parts) != 3:
+        payload_part, signature_part = token.split(".", 1)
+        expected = hmac.new(SECRET_KEY.encode("utf-8"), payload_part.encode("ascii"), hashlib.sha256).digest()
+        supplied = base64.urlsafe_b64decode(signature_part + "=" * (-len(signature_part) % 4))
+        if not hmac.compare_digest(expected, supplied):
             return None
-        _, sig, hex_payload = parts
-        payload_str = bytes.fromhex(hex_payload).decode("utf-8")
-        payload = json.loads(payload_str)
-        if payload.get("exp", 0) < time.time():
+        payload_json = base64.urlsafe_b64decode(payload_part + "=" * (-len(payload_part) % 4))
+        payload = json.loads(payload_json.decode("utf-8"))
+        if not isinstance(payload, dict) or not payload.get("sub") or payload.get("exp", 0) < time.time():
             return None
         return payload
-    except Exception:
+    except (ValueError, TypeError, json.JSONDecodeError):
         return None
 
 
