@@ -3,6 +3,7 @@ import html
 import os
 import re
 import requests
+import pandas as pd
 import streamlit as st
 
 raw_api_address = os.getenv("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
@@ -76,8 +77,8 @@ def show_auth():
     left, right = st.columns([1.08, .92], gap="large")
     with left:
         st.markdown(
-            '<div class="zp-panel"><div class="label">ZonePulse · New York City</div>'
-            '<h1>Clearer decisions for every city ride.</h1>'
+            '<div class="zp-panel"><div class="label">ZonePulse · Global mobility</div>'
+            '<h1>A clearer way to plan every city ride.</h1>'
             '<p>A focused workspace for fare estimates, pickup planning, and demand signals. '
             'Your bookings and account details stay together in one place.</p>'
             '<br><span class="zp-status">Rider workspace</span> '
@@ -85,7 +86,7 @@ def show_auth():
             unsafe_allow_html=True,
         )
         st.markdown("### Built around the trip")
-        st.write("Demand-aware estimates across mapped New York locations.")
+        st.write("Worldwide place search with location-aware ride estimates.")
         st.write("Pickup timing, nearby driver estimates, and saved trip history.")
         st.caption("This portfolio demonstration uses simulated driver availability and ride estimates.")
     with right:
@@ -157,7 +158,7 @@ safe_username = html.escape(display_name)
 
 with st.sidebar:
     st.markdown("## ZonePulse")
-    st.caption("NYC mobility operations")
+    st.caption("Global mobility workspace")
     st.divider()
     page = st.radio(
         "Workspace",
@@ -184,7 +185,7 @@ def page_header(title, description):
 
 
 def render_overview():
-    page_header(f"Welcome back, {safe_username}.", "Your trips, pickup activity, and city demand at a glance.")
+    page_header(f"Welcome back, {safe_username}.", "Your trips, pickup activity, and demand estimates at a glance.")
     try:
         stats = api_call("/stats", token=token)
         peak = api_call("/peak-hours", token=token)
@@ -231,54 +232,90 @@ def render_overview():
                 route, details = st.columns([1.4, 1])
                 route.markdown(f"**{trip['pickup_address']}**  →  **{trip['dropoff_address']}**")
                 route.caption(f"{trip.get('created_at', 'Date unavailable')} · {trip.get('booking_id', '')}")
-                details.write(f"{trip.get('ride_tier', 'Ride')} · {trip.get('fare', 0):.2f} USD")
+                details.write(f"{trip.get('ride_tier', 'Ride')} · {trip.get('fare', 0):.2f} USD equivalent")
                 details.caption(f"{trip.get('status', 'Confirmed')} · Driver {trip.get('driver_name') or 'pending'}")
 
 
-def render_ride_planner():
-    page_header("Plan a ride", "Compare a route estimate, then save the confirmed trip to your account.")
-    try:
-        landmarks = api_call("/landmarks")
-    except (requests.RequestException, RuntimeError) as exc:
-        st.error(f"Pickup locations could not be loaded: {exc}")
-        return
-    if not landmarks:
-        st.warning("No mapped locations are available.")
-        return
+def _global_place_search(query):
+    from urllib.parse import quote
+    return api_call(f"/geocode?q={quote(query.strip())}", token=token, timeout=15)
 
-    names = [item["name"] for item in landmarks]
-    by_name = {item["name"]: item for item in landmarks}
+
+def render_ride_planner():
+    page_header("Plan a ride", "Search an address anywhere in the world, review the route points, and save your estimate.")
+    st.markdown(
+        '<div class="zp-hero"><strong>Worldwide location search</strong><p>Search cities, addresses, airports, and landmarks. '
+        'The New York model is used only in its training area; other cities receive a clearly labeled global planning baseline.</p></div>',
+        unsafe_allow_html=True,
+    )
+    with st.form("global_route_search"):
+        origin_query = st.text_input("Pickup", placeholder="Street, landmark, or city and country")
+        destination_query = st.text_input("Destination", placeholder="Street, landmark, or city and country")
+        search_locations = st.form_submit_button("Search locations", type="primary")
+    if search_locations:
+        for key in ("global_origins", "global_destinations", "ride_quote", "ride_route"):
+            st.session_state.pop(key, None)
+        if len(origin_query.strip()) < 3 or len(destination_query.strip()) < 3:
+            st.error("Enter at least three characters for both locations.")
+        else:
+            try:
+                with st.spinner("Searching the global place index…"):
+                    origins = _global_place_search(origin_query)
+                    destinations = _global_place_search(destination_query)
+                if not origins:
+                    st.error("No pickup locations matched. Try adding a city or country.")
+                elif not destinations:
+                    st.error("No destinations matched. Try adding a city or country.")
+                else:
+                    st.session_state["world_pickup_result"] = 0
+                    st.session_state["world_destination_result"] = 0
+                    st.session_state["global_origins"] = origins
+                    st.session_state["global_destinations"] = destinations
+                    st.session_state["global_origin_query"] = origin_query.strip()
+                    st.session_state["global_destination_query"] = destination_query.strip()
+                    st.session_state.pop("ride_quote", None)
+                    st.session_state.pop("ride_route", None)
+            except (requests.RequestException, RuntimeError) as exc:
+                st.error(f"Location search could not be completed: {exc}")
+
+    origins = st.session_state.get("global_origins", [])
+    destinations = st.session_state.get("global_destinations", [])
+    if not origins or not destinations:
+        return
+    st.markdown('<div class="zp-section"><h3>Choose the matching places</h3></div>', unsafe_allow_html=True)
     with st.form("quote_form"):
         col_a, col_b = st.columns(2)
         with col_a:
-            pickup = st.selectbox("Pickup location", names, index=names.index("Times Square, Manhattan") if "Times Square, Manhattan" in names else 0)
+            origin_idx = st.selectbox("Pickup result", range(len(origins)),
+                                      format_func=lambda i: origins[i]["label"], key="world_pickup_result")
         with col_b:
-            destination_index = names.index("JFK International Airport (Terminal 4)") if "JFK International Airport (Terminal 4)" in names else min(1, len(names) - 1)
-            destination = st.selectbox("Destination", names, index=destination_index)
+            destination_idx = st.selectbox("Destination result", range(len(destinations)),
+                                           format_func=lambda i: destinations[i]["label"], key="world_destination_result")
         col_c, col_d = st.columns(2)
         with col_c:
-            hour = st.slider("Pickup hour", 0, 23, 18, format="%d:00")
+            hour = st.slider("Pickup hour (local time)", 0, 23, 18, format="%d:00")
         with col_d:
-            day = st.selectbox("Travel day", list(range(7)), index=4, format_func=lambda idx: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][idx])
-        quote_submitted = st.form_submit_button("Calculate estimate", type="primary")
+            day = st.selectbox("Travel day", list(range(7)), index=4,
+                               format_func=lambda idx: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][idx])
+        quote_submitted = st.form_submit_button("Get ride estimate", type="primary")
     if quote_submitted:
-        if pickup == destination:
-            st.error("Choose different pickup and destination locations.")
+        start, end = origins[origin_idx], destinations[destination_idx]
+        if (start["lat"], start["lon"]) == (end["lat"], end["lon"]):
+            st.error("Choose a different pickup and destination.")
         else:
-            start, end = by_name[pickup], by_name[destination]
             payload = {
                 "passenger_name": username,
-                "pickup_address": pickup,
+                "pickup_address": start["label"],
                 "pickup_lat": start["lat"],
                 "pickup_lon": start["lon"],
-                "dropoff_address": destination,
+                "dropoff_address": end["label"],
                 "dropoff_lat": end["lat"],
                 "dropoff_lon": end["lon"],
                 "hour": hour,
                 "day_of_week": day,
             }
             try:
-                with st.spinner("Preparing the route estimate…"):
+                with st.spinner("Preparing your ride estimate…"):
                     quote = api_call("/ride/quote", "POST", payload, token=token, timeout=90)
                 st.session_state["ride_quote"] = quote
                 st.session_state["ride_route"] = payload
@@ -291,33 +328,42 @@ def render_ride_planner():
     route = st.session_state.get("ride_route")
     if not quote or not route:
         return
-
-    st.markdown('<div class="zp-section"><h3>Estimate details</h3></div>', unsafe_allow_html=True)
-    route_col, metric_col = st.columns([1.1, 1.4], gap="large")
-    with route_col:
+    st.markdown('<div class="zp-section"><h3>Your estimate</h3></div>', unsafe_allow_html=True)
+    left, right = st.columns([1.05, 1.45], gap="large")
+    with left:
         st.markdown(f"**{route['pickup_address']}**  →  **{route['dropoff_address']}**")
-        st.caption(f"Approx. {quote['distance_km']:.1f} km · {quote['duration_minutes']} min")
+        st.caption(f"Approx. {quote['distance_km']:.1f} km · {quote['duration_minutes']} min · USD equivalent")
         st.markdown(f"<span class='zp-status'>{html.escape(quote['demand_tier'])} demand</span>", unsafe_allow_html=True)
         st.write(quote.get("availability_status", "Availability estimate"))
-    with metric_col:
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Pickup wait", f"{quote['estimated_wait_time_minutes']} min")
-        m2.metric("Find-a-car estimate", f"{quote['probability_finding_car_pct']:.0f}%")
-        m3.metric("Surge factor", f"{quote['surge_multiplier']:.2f}×")
+        if quote.get("prediction_source") == "Global planning baseline":
+            st.warning(quote.get("prediction_note"))
+        else:
+            st.caption(quote.get("prediction_note", ""))
+    with right:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Pickup estimate", f"{quote['estimated_wait_time_minutes']} min")
+        c2.metric("Availability estimate", f"{quote['probability_finding_car_pct']:.0f}%")
+        c3.metric("Fare adjustment", f"{quote['surge_multiplier']:.2f}×")
+    map_points = [
+        {"lat": route["pickup_lat"], "lon": route["pickup_lon"]},
+        {"lat": route["dropoff_lat"], "lon": route["dropoff_lon"]},
+    ]
+    driver = st.session_state.get("ride_driver") or {}
+    if driver.get("lat") is not None and driver.get("lon") is not None:
+        map_points.append({"lat": driver["lat"], "lon": driver["lon"]})
+    st.caption("Pickup, destination, and simulated nearby driver locations")
+    st.map(pd.DataFrame(map_points), use_container_width=True)
 
     tiers = list(quote["fares"])
-    selected_tier = st.radio(
-        "Ride option",
-        tiers,
-        horizontal=True,
-        key="ride_tier",
-        format_func=lambda tier: f"{tier} · {quote['fares'][tier]:.2f} USD",
-    )
+    selected_tier = st.radio("Ride option", tiers, horizontal=True, key="ride_tier",
+                             format_func=lambda tier: f"{tier} · {quote['fares'][tier]:.2f} USD equivalent")
     drivers = quote.get("nearby_drivers", [])
+    if not drivers:
+        st.warning("No simulated drivers are available for this estimate.")
+        return
     selected_driver = st.selectbox(
-        "Suggested driver",
-        drivers,
-        format_func=lambda item: f"{item['name']} · {item['car_model']} · {item['eta_minutes']} min away · ★ {item['rating']}",
+        "Suggested simulated driver", drivers,
+        format_func=lambda item: f"{item['name']} · {item['car_model']} · {item['eta_minutes']} min · ★ {item['rating']}",
         key="ride_driver",
     )
     with st.form("confirm_ride_form"):
@@ -325,34 +371,24 @@ def render_ride_planner():
         confirm = st.form_submit_button("Confirm and save trip", type="primary")
     if confirm:
         booking = {
-            **route,
-            "passenger_name": username,
-            "phone": phone.strip() or None,
-            "distance_km": quote["distance_km"],
-            "duration_mins": quote["duration_minutes"],
-            "ride_tier": selected_tier,
-            "fare": quote["fares"][selected_tier],
-            "driver_id": selected_driver.get("driver_id"),
-            "driver_name": selected_driver.get("name"),
-            "driver_rating": selected_driver.get("rating"),
-            "car_model": selected_driver.get("car_model"),
-            "car_color": selected_driver.get("car_color"),
-            "car_plate": selected_driver.get("plate"),
-            "driver_lat": selected_driver.get("lat"),
-            "driver_lon": selected_driver.get("lon"),
+            **route, "passenger_name": username, "phone": phone.strip() or None,
+            "distance_km": quote["distance_km"], "duration_mins": quote["duration_minutes"],
+            "ride_tier": selected_tier, "fare": quote["fares"][selected_tier],
+            "driver_id": selected_driver.get("driver_id"), "driver_name": selected_driver.get("name"),
+            "driver_rating": selected_driver.get("rating"), "car_model": selected_driver.get("car_model"),
+            "car_color": selected_driver.get("car_color"), "car_plate": selected_driver.get("plate"),
+            "driver_lat": selected_driver.get("lat"), "driver_lon": selected_driver.get("lon"),
             "driver_distance_km": selected_driver.get("distance_km"),
             "eta_mins": selected_driver.get("eta_minutes", quote["estimated_wait_time_minutes"]),
             "predicted_hourly_demand": quote.get("predicted_hourly_demand"),
-            "demand_tier": quote.get("demand_tier"),
-            "surge_multiplier": quote.get("surge_multiplier"),
+            "demand_tier": quote.get("demand_tier"), "surge_multiplier": quote.get("surge_multiplier"),
             "probability_finding_car_pct": quote.get("probability_finding_car_pct"),
         }
         try:
             result = api_call("/ride/book", "POST", booking, token=token, timeout=60)
             st.success(f"Trip saved · {result['booking']['booking_id']}")
-            st.session_state.pop("ride_quote", None)
-            st.session_state.pop("ride_route", None)
-            st.session_state.pop("ride_driver", None)
+            for key in ("ride_quote", "ride_route", "ride_driver"):
+                st.session_state.pop(key, None)
             st.rerun()
         except (requests.RequestException, RuntimeError) as exc:
             st.error(f"Trip could not be saved: {exc}")
@@ -370,7 +406,7 @@ def render_trip_history():
         return
     st.caption(f"{len(trips)} saved trip{'s' if len(trips) != 1 else ''}")
     for trip in trips:
-        title = f"{trip.get('pickup_address', 'Pickup')}  →  {trip.get('dropoff_address', 'Destination')}  ·  {trip.get('fare', 0):.2f} USD"
+        title = f"{trip.get('pickup_address', 'Pickup')}  →  {trip.get('dropoff_address', 'Destination')}  ·  {trip.get('fare', 0):.2f} USD equivalent"
         with st.expander(title):
             left, right = st.columns(2)
             left.write(f"**Booking reference**  ·  {trip.get('booking_id', '—')}")
@@ -413,51 +449,20 @@ def render_fleet():
 
 
 def render_demand_insights():
-    page_header("Demand insights", "Explore the demand model using a zone and pickup time.")
-    with st.form("forecast_form"):
-        col_a, col_b, col_c = st.columns(3)
-        with col_a:
-            location = st.number_input("Location code", min_value=0, max_value=10000, value=100, step=1)
-        with col_b:
-            hour = st.slider("Hour of day", 0, 23, 18)
-        with col_c:
-            day = st.selectbox("Day of week", list(range(7)), index=4, format_func=lambda idx: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][idx])
-        month = st.selectbox("Month", list(range(1, 13)), index=5)
-        run = st.form_submit_button("Run forecast", type="primary")
-    if run:
-        params = {
-            "location_code": int(location),
-            "hour": hour,
-            "day_of_week": day,
-            "month": month,
-            "is_weekend": int(day >= 5),
-            "hour_bin": hour // 3,
-            "cluster": 0,
-        }
-        try:
-            response = requests.get(
-                f"{API_BASE_URL}/predict",
-                params=params,
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=90,
-            )
-            if not response.ok:
-                detail = response.json().get("detail", "Forecast request failed.")
-                raise RuntimeError(str(detail))
-            prediction = response.json()
-            classification_response = requests.get(
-                f"{API_BASE_URL}/classify",
-                params=params,
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=90,
-            )
-            classification = classification_response.json() if classification_response.ok else {}
-            result_a, result_b = st.columns(2)
-            result_a.metric("Predicted hourly demand", f"{prediction.get('predicted_demand', 0):.1f}")
-            result_b.metric("Demand category", classification.get("demand_category", "Unavailable"))
-            st.write(classification.get("recommended_action", prediction.get("interpretation", "")))
-        except (requests.RequestException, RuntimeError, ValueError) as exc:
-            st.error(f"The forecast could not be calculated: {exc}")
+    page_header("Demand insights", "Understand what each location estimate represents.")
+    st.markdown(
+        '<div class="zp-hero"><strong>New York model coverage</strong>'
+        '<p>The trained demand model uses New York City trip history. Within that area, ride quotes use its model output. '
+        'For other places, the app uses a transparent time-of-week planning baseline until local trip data is available.</p></div>',
+        unsafe_allow_html=True,
+    )
+    st.subheader("Forecast framework")
+    a, b, c = st.columns(3)
+    a.metric("Location coverage", "Worldwide search")
+    b.metric("Local model", "New York City")
+    c.metric("Other regions", "Planning baseline")
+    st.info("Use Plan a ride to search any address, inspect pickup and destination map points, and view its demand tier, wait estimate, and fare options.")
+    st.caption("Global baseline outputs are directional planning estimates. They are not trained predictions, live driver availability, live traffic, or a production ride-hailing quote.")
 
 
 if page == "Overview":
@@ -472,4 +477,4 @@ else:
     render_demand_insights()
 
 st.divider()
-st.caption("ZonePulse · NYC mobility intelligence · Driver availability and ride quotes are estimates.")
+st.caption("ZonePulse · Global mobility planning · Driver availability and ride estimates are simulated.")

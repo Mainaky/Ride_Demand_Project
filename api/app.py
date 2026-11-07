@@ -11,9 +11,11 @@ Docs           : /docs           → auto-generated Swagger UI
 """
 
 import os, json
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 from functools import lru_cache
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
@@ -72,8 +74,8 @@ SECURITY = HTTPBearer(auto_error=False)
 
 app = FastAPI(
     title="ZonePulse Ride Demand & Booking API",
-    description="Enterprise REST service for ride availability calculation, dynamic surge pricing, ML demand forecasting, and real-time ride booking.",
-    version="2.5.0",
+    description="Portfolio API for global ride planning estimates, NYC-trained demand forecasting, and passenger trip records.",
+    version="2.7.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -101,11 +103,11 @@ def require_current_user(user: Optional[dict] = Depends(get_current_user)) -> di
 class RideQuoteRequest(BaseModel):
     passenger_name: str = Field(default="Valued Passenger")
     pickup_address: str = Field(default="Times Square, Manhattan")
-    pickup_lat: float = Field(ge=40.4, le=41.2)
-    pickup_lon: float = Field(ge=-74.4, le=-73.6)
+    pickup_lat: float = Field(ge=-90, le=90)
+    pickup_lon: float = Field(ge=-180, le=180)
     dropoff_address: str = Field(default="JFK International Airport (Terminal 4)")
-    dropoff_lat: float = Field(ge=40.4, le=41.2)
-    dropoff_lon: float = Field(ge=-74.4, le=-73.6)
+    dropoff_lat: float = Field(ge=-90, le=90)
+    dropoff_lon: float = Field(ge=-180, le=180)
     hour: int = Field(default=18, ge=0, le=23)
     day_of_week: int = Field(default=4, ge=0, le=6)
 
@@ -128,7 +130,7 @@ class RideBookingRequest(BaseModel):
     driver_rating: Optional[float] = 4.95
     car_model: Optional[str] = "Toyota Camry Hybrid"
     car_color: Optional[str] = None
-    car_plate: Optional[str] = "TLC #7K82"
+    car_plate: Optional[str] = "DEMO-7K82"
     driver_lat: Optional[float] = None
     driver_lon: Optional[float] = None
     driver_distance_km: Optional[float] = None
@@ -176,10 +178,11 @@ def root():
     return {
         "status": "ok",
         "service": "ZonePulse Ride Demand & Booking API",
-        "version": "2.6.0",
+        "version": "2.7.0",
         "endpoints": {
             "health":         "GET /",
             "landmarks":      "GET /landmarks",
+            "geocode":        "GET /geocode?q=place",
             "ride_quote":     "POST /ride/quote",
             "ride_book":      "POST /ride/book",
             "ride_history":   "GET /ride/history",
@@ -207,6 +210,36 @@ def list_landmarks():
         {"name": name, "lat": coords[0], "lon": coords[1]}
         for name, coords in landmarks.items()
     ]
+
+
+@app.get("/geocode")
+def geocode_location(q: str = Query(..., min_length=3, max_length=160),
+                     user: dict = Depends(require_current_user)):
+    """Resolve a worldwide place or address to selectable map coordinates."""
+    params = urlencode({"q": q.strip(), "limit": 5, "lang": "en"})
+    request = Request(
+        f"https://photon.komoot.io/api/?{params}",
+        headers={"User-Agent": "ZonePulse/1.0 (mobility planning demo)"},
+    )
+    try:
+        with urlopen(request, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Location search is temporarily unavailable. Please try again.") from exc
+
+    results = []
+    for feature in payload.get("features", []):
+        properties = feature.get("properties") or {}
+        coordinates = (feature.get("geometry") or {}).get("coordinates") or []
+        if len(coordinates) < 2:
+            continue
+        parts = [properties.get("name"), properties.get("street"),
+                 properties.get("city") or properties.get("county"),
+                 properties.get("state"), properties.get("country")]
+        label = ", ".join(dict.fromkeys(str(part).strip() for part in parts if part))
+        results.append({"label": label or q.strip(), "lat": float(coordinates[1]),
+                        "lon": float(coordinates[0]), "country_code": properties.get("countrycode")})
+    return results
 
 
 @app.post("/ride/quote")

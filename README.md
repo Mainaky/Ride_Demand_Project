@@ -1,7 +1,7 @@
 # ZonePulse: Ride Demand Prediction & Surge Pricing System
-### Uber/Ola · NYC · Data Engineering + Machine Learning + Full-Stack Cloud Deployment
+### Global mobility planning · NYC-trained demand intelligence · Full-Stack Cloud Deployment
 
-> Production-grade demand forecasting and fleet intelligence system. Processes 4.7M+ raw NYC ride-hailing records across heterogeneous schemas, loads data into Snowflake cloud data warehouse, predicts zone-hour ride demand using XGBoost + PCA + KMeans, and serves real-time predictions via an authenticated FastAPI REST microservice and an interactive Streamlit dashboard.
+> Portfolio mobility planning system. It processes NYC ride-hailing records, loads data into Snowflake, and serves authenticated planning estimates through FastAPI and a Streamlit dashboard. Worldwide address search accepts global places. The demand model is trained on NYC data only: other locations receive a clearly labeled time-of-week baseline, not a claim of locally trained prediction.
 
 ---
 
@@ -46,15 +46,19 @@
    - Passenger profiles, driver and vehicle profiles, trip routes and coordinates, fare and demand estimates, timestamps, and booking status are stored in related tables.
    - Each passenger can view only their own trip history.
    - Driver availability is simulated for this portfolio application and is not a live dispatch network.
-3. **Dual Machine Learning Engine:**
+3. **Global location planning:**
+   - Worldwide addresses and landmarks are resolved with the [Photon geocoding API](https://github.com/komoot/photon/blob/master/docs/api-v1.md). Its public demo service may throttle heavy use and has no availability guarantee.
+   - In the New York training area, demand outputs use the trained model. Elsewhere, the app shows a transparent time-of-week planning baseline until regional training data is available.
+   - Route distances and estimated fares are shown as USD-equivalent planning estimates, not local market rates or live ride quotes.
+4. **Dual Machine Learning Engine:**
    - **Regression Track (XGBoost):** Explains **79.3% of demand variance** ($R^2 = 0.7930$, $\text{MAE} = 7.97$ rides) to forecast exact ride counts for driver capacity sizing.
    - **Classification Track (XGBoost):** Categorizes demand into 4 operational tiers (**Low**, **Medium**, **High**, **Very High**) with **67.8% accuracy** to trigger automated surge multipliers.
-4. **Unsupervised Intelligence:**
+5. **Unsupervised Intelligence:**
    - **PCA (Principal Component Analysis):** Projects 5-dimensional feature space onto 2 principal components for interactive 2D cluster inspection.
    - **K-Means Clustering ($k=4$):** Segments zones into behavioral groups and feeds cluster labels back into XGBoost as augmented features.
-5. **Snowflake Cloud Data Warehouse:**
+6. **Snowflake Cloud Data Warehouse:**
    - Staged bulk loading using `write_pandas` and analytical SQL queries identifying evening peak commute windows (17:00–21:00) and spatial corridors.
-6. **Production Deployment Ready:**
+7. **Production Deployment Ready:**
    - Multi-service `render.yaml` Blueprint for 1-click cloud deployment on Render.
 
 ---
@@ -104,7 +108,7 @@ uvicorn app:app --reload --host 127.0.0.1 --port 8000
 cd dashboard
 streamlit run app.py
 ```
-* Dashboard opens at `http://localhost:8501` with account creation as the first screen.
+* Dashboard opens at `http://localhost:8501` with account creation as the first screen. Use Plan a ride to search pickup and destination worldwide.
 * Set `API_BASE_URL` to the running FastAPI service URL (defaults to localhost).
 
 ---
@@ -123,7 +127,7 @@ This repository includes a `render.yaml` Blueprint for 1-click cloud deployment.
    - `zonepulse-dashboard` (Streamlit UI)
 6. The Blueprint adopts the existing `Ride_Demand_Project` dashboard service and creates `zonepulse-api` for authentication and predictions. Open the existing dashboard URL to create an account.
 
-The Render Blueprint installs a small dependency set for the dashboard and a model-serving set for the API; Snowflake and EDA packages stay out of the web-service builds. Free Render services can spin down when idle, so their first request after inactivity may take longer. SQLite databases use the service filesystem by default; configure `ZONEPULSE_DATA_DIR` to a mounted persistent disk path if your Render plan includes one.
+The Render Blueprint installs a small dependency set for the dashboard and a model-serving set for the API; Snowflake and EDA packages stay out of the web-service builds. Free Render web services can spin down when idle. The shared public Photon geocoder is suitable only for reasonable interactive search volume. Forecasts outside New York training coverage are planning baselines.
 
 ---
 
