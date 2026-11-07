@@ -103,9 +103,9 @@ This repository includes a `render.yaml` Blueprint for 1-click cloud deployment.
 5. Render will automatically provision both:
    - `zonepulse-api` (FastAPI backend)
    - `zonepulse-dashboard` (Streamlit UI)
-6. Once deployed, open the public URL of `zonepulse-dashboard` to create an account and use the app.
+6. The Blueprint adopts the existing `Ride_Demand_Project` dashboard service and creates `zonepulse-api` for authentication and predictions. Open the existing dashboard URL to create an account.
 
-The Render blueprint installs a small dependency set for the dashboard and a model-serving set for the API; Snowflake and EDA packages stay out of the web-service builds. Free Render services can spin down when idle, so their first request after inactivity may take longer. SQLite databases use the service filesystem by default; configure `ZONEPULSE_DATA_DIR` to a mounted persistent disk path if your Render plan includes one.
+The Render Blueprint installs a small dependency set for the dashboard and a model-serving set for the API; Snowflake and EDA packages stay out of the web-service builds. Free Render services can spin down when idle, so their first request after inactivity may take longer. SQLite databases use the service filesystem by default; configure `ZONEPULSE_DATA_DIR` to a mounted persistent disk path if your Render plan includes one.
 
 ---
 
