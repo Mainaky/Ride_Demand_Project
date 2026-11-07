@@ -370,7 +370,12 @@ app.get("/api/insights", authenticate, async (_req, res) => {
   res.json({ coverage: "Worldwide route search", model: "Global time-of-week baseline", note: "Ride demand, driver availability and fare figures are planning estimates. They are not live dispatch, traffic, or market quotes." });
 });
 
-app.use(express.static(path.join(here, "public"), { maxAge: isProduction ? "1h" : 0 }));
+app.use(express.static(path.join(here, "public"), {
+  maxAge: isProduction ? "1h" : 0,
+  setHeaders(res, filePath) {
+    if (/\.(?:html|js|css)$/i.test(filePath)) res.setHeader("Cache-Control", "no-cache, max-age=0, must-revalidate");
+  },
+}));
 app.get("*", (req, res, next) => req.path.startsWith("/api/") ? next() : res.sendFile(path.join(here, "public", "index.html")));
 
 app.use((error, _req, res, _next) => {
