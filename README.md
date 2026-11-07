@@ -86,7 +86,8 @@ uvicorn app:app --reload --host 127.0.0.1 --port 8000
 cd dashboard
 streamlit run app.py
 ```
-* Dashboard opens at `http://localhost:8501` with account creation as the first screen.\n* Set `API_BASE_URL` to the running FastAPI service URL (defaults to localhost).
+* Dashboard opens at `http://localhost:8501` with account creation as the first screen.
+* Set `API_BASE_URL` to the running FastAPI service URL (defaults to localhost).
 
 ---
 
@@ -102,7 +103,9 @@ This repository includes a `render.yaml` Blueprint for 1-click cloud deployment.
 5. Render will automatically provision both:
    - `zonepulse-api` (FastAPI backend)
    - `zonepulse-dashboard` (Streamlit UI)
-6. Once deployed, open the public URL of `zonepulse-dashboard` to create an account and use the app.\n\nThe Render blueprint installs a small dependency set for the dashboard and a model-serving set for the API; Snowflake and EDA packages stay out of the web-service builds. Free Render services can spin down when idle, so their first request after inactivity may take longer. SQLite databases use the service filesystem by default; configure `ZONEPULSE_DATA_DIR` to a mounted persistent disk path if your Render plan includes one.
+6. Once deployed, open the public URL of `zonepulse-dashboard` to create an account and use the app.
+
+The Render blueprint installs a small dependency set for the dashboard and a model-serving set for the API; Snowflake and EDA packages stay out of the web-service builds. Free Render services can spin down when idle, so their first request after inactivity may take longer. SQLite databases use the service filesystem by default; configure `ZONEPULSE_DATA_DIR` to a mounted persistent disk path if your Render plan includes one.
 
 ---
 
