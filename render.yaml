@@ -28,8 +28,6 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.10
+      # Free Render web services cannot receive private network requests.
       - key: API_BASE_URL
-        fromService:
-          type: web
-          name: zonepulse-api
-          property: hostport
+        value: https://zonepulse-api-mmyw.onrender.com
