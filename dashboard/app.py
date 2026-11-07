@@ -1,44 +1,61 @@
-"""ZonePulse web experience: signup first, then mobility operations."""
+"""ZonePulse — a concise mobility operations workspace."""
 import html
 import os
+import re
 import requests
 import streamlit as st
 
-_api_address = os.getenv("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
-API_BASE_URL = _api_address if "://" in _api_address else f"http://{_api_address}"
-st.set_page_config(page_title="ZonePulse | NYC Mobility", page_icon="Z", layout="wide", initial_sidebar_state="collapsed")
+raw_api_address = os.getenv("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+API_BASE_URL = raw_api_address if "://" in raw_api_address else f"http://{raw_api_address}"
+
+st.set_page_config(
+    page_title="ZonePulse | Mobility Operations",
+    page_icon="Z",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
-:root { --ink:#102b3f; --muted:#6b7c8c; --teal:#087e78; --mint:#d9f3ee; --line:#e6edf0; }
+:root { --navy:#142b3c; --navy-2:#213b4e; --teal:#137c72; --teal-soft:#e8f4f1; --ink:#202c36; --muted:#71808b; --line:#e4e9ed; --paper:#f5f7f8; }
 html, body, [class*="css"] { font-family:'DM Sans',sans-serif; color:var(--ink); }
-.stApp { background:linear-gradient(180deg,#f4faf9 0%,#f7f9fb 44%,#f7f9fb 100%); }
-h1,h2,h3 { font-family:'Manrope',sans-serif; letter-spacing:-.035em; color:var(--ink); }
-.block-container { max-width:1180px; padding-top:2rem; padding-bottom:3rem; }
+.stApp { background:var(--paper); }
+.block-container { max-width:1260px; padding-top:1.8rem; padding-bottom:3rem; }
+h1,h2,h3,h4 { font-family:'Manrope',sans-serif; color:var(--navy); letter-spacing:-.025em; }
+h1 { font-size:2rem !important; }
 [data-testid="stSidebar"] { background:#fff; border-right:1px solid var(--line); }
-div[data-testid="stMetric"] { background:white; border:1px solid var(--line); border-radius:16px; padding:18px 20px; box-shadow:0 7px 24px rgba(16,43,63,.035); }
-div[data-testid="stForm"] { background:white; border:1px solid var(--line); padding:24px; border-radius:18px; }
-.stButton > button[kind="primary"], .stFormSubmitButton > button { background:#087e78; border:0; border-radius:10px; color:white; font-weight:700; min-height:44px; }
-.stButton > button { border-radius:10px; min-height:42px; }
-input, textarea, [data-baseweb="select"] { border-radius:9px !important; }
-.zp-hero { background:linear-gradient(118deg,#102b3f 0%,#174957 55%,#087e78 100%); color:white; padding:28px 32px; border-radius:20px; margin:0 0 25px; box-shadow:0 16px 38px rgba(16,43,63,.12); }
-.zp-hero h1 { color:white; margin:4px 0 8px; font-size:2rem; }
-.zp-hero p { color:#d7e8e8; margin:0; }
-.zp-eyebrow { color:#a8dfd3; text-transform:uppercase; letter-spacing:.13em; font-size:.72rem; font-weight:700; }
-.zp-auth { background:white; border:1px solid var(--line); border-radius:22px; padding:28px 30px; box-shadow:0 18px 50px rgba(16,43,63,.07); }
-.zp-note { color:var(--muted); font-size:.9rem; }
-.zp-chip { display:inline-block; border-radius:99px; padding:6px 11px; background:#e4f5f1; color:#087e78; font-size:.78rem; font-weight:700; }
+div[data-testid="stMetric"] { background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px 18px; box-shadow:0 2px 10px rgba(20,43,60,.025); }
+div[data-testid="stForm"] { background:#fff; border:1px solid var(--line); padding:22px; border-radius:14px; }
+.stButton > button[kind="primary"], .stFormSubmitButton > button { background:var(--navy); border:1px solid var(--navy); border-radius:8px; color:#fff; font-weight:600; min-height:44px; }
+.stButton > button[kind="primary"]:hover, .stFormSubmitButton > button:hover { background:var(--teal); border-color:var(--teal); color:#fff; }
+.stButton > button { border-radius:8px; min-height:40px; }
+input, textarea, [data-baseweb="select"] { border-radius:7px !important; }
+[data-testid="stTabs"] button[role="tab"] { font-weight:600; }
+.zp-topline { color:var(--teal); font-size:.73rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase; }
+.zp-panel { color:#fff; background:linear-gradient(145deg,#142b3c,#1c4852); border-radius:18px; padding:38px; min-height:380px; box-shadow:0 12px 32px rgba(20,43,60,.10); }
+.zp-panel h1 { color:#fff; font-size:2.25rem !important; line-height:1.16; margin:14px 0; }
+.zp-panel p { color:#d4e0e3; font-size:1rem; line-height:1.7; }
+.zp-panel .label { color:#a8d9cd; font-size:.72rem; font-weight:700; letter-spacing:.13em; text-transform:uppercase; }
+.zp-auth-card { background:white; border:1px solid var(--line); border-radius:16px; padding:28px; box-shadow:0 8px 28px rgba(20,43,60,.045); }
+.zp-caption { color:var(--muted); font-size:.9rem; }
+.zp-section { border-bottom:1px solid var(--line); padding:0 0 12px; margin:26px 0 16px; }
+.zp-status { display:inline-block; background:var(--teal-soft); color:var(--teal); border-radius:99px; padding:5px 10px; font-weight:700; font-size:.75rem; }
+.zp-hero { background:#fff; border:1px solid var(--line); border-radius:14px; padding:22px 26px; margin-bottom:20px; }
+.zp-hero p { color:var(--muted); margin:0; }
 </style>
 """, unsafe_allow_html=True)
 
-def api_call(path, method="GET", payload=None, token=None, timeout=25):
+
+def api_call(path, method="GET", payload=None, token=None, timeout=45):
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    response = requests.request(method, f"{API_BASE_URL}{path}", json=payload, headers=headers, timeout=timeout)
+    response = requests.request(
+        method, f"{API_BASE_URL}{path}", json=payload, headers=headers, timeout=timeout
+    )
     try:
         body = response.json()
     except ValueError:
-        body = {"detail": response.text or "The API returned an unreadable response."}
+        body = {"detail": response.text or "The service returned an unreadable response."}
     if not response.ok:
         detail = body.get("detail", "Request failed.")
         if isinstance(detail, list):
@@ -46,60 +63,87 @@ def api_call(path, method="GET", payload=None, token=None, timeout=25):
         raise RuntimeError(str(detail))
     return body
 
+
+def establish_session(result):
+    st.session_state["zp_token"] = result["access_token"]
+    st.session_state["zp_username"] = result["username"]
+    st.session_state["zp_email"] = result["email"]
+    st.rerun()
+
+
 def show_auth():
-    left, right = st.columns([1.04, .96], gap="large")
+    left, right = st.columns([1.08, .92], gap="large")
     with left:
-        st.markdown('<div class="zp-hero"><div class="zp-eyebrow">NYC mobility intelligence</div><h1>Move through the city with a clearer picture.</h1><p>Plan a ride, understand demand, and keep your trip details together in one calm workspace.</p></div>', unsafe_allow_html=True)
-        st.markdown("#### A useful view of the next ride")
-        st.markdown("- Demand-aware fare estimates for NYC locations")
-        st.markdown("- Pickup availability and estimated driver wait")
-        st.markdown("- Private trip history tied to your account")
-        st.caption("ZonePulse is a portfolio demonstration. Driver availability and trip quotes are simulated estimates.")
+        st.markdown(
+            '<div class="zp-panel"><div class="label">ZonePulse · New York City</div>'
+            '<h1>Clearer decisions for every city ride.</h1>'
+            '<p>A focused workspace for fare estimates, pickup planning, and demand signals. '
+            'Your bookings and account details stay together in one place.</p>'
+            '<br><span class="zp-status">Rider workspace</span> '
+            '<span class="zp-status">Demand intelligence</span></div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("### Built around the trip")
+        st.write("Demand-aware estimates across mapped New York locations.")
+        st.write("Pickup timing, nearby driver estimates, and saved trip history.")
+        st.caption("This portfolio demonstration uses simulated driver availability and ride estimates.")
     with right:
-        st.markdown('<div class="zp-auth"><span class="zp-chip">WELCOME TO ZONEPULSE</span><h2 style="margin-top:16px">Your mobility workspace</h2><p class="zp-note">Create an account to get started, or sign in to continue.</p></div>', unsafe_allow_html=True)
-        create_tab, login_tab = st.tabs(["Create account", "Sign in"])
+        st.markdown('<div class="zp-auth-card">', unsafe_allow_html=True)
+        st.markdown('<div class="zp-topline">Welcome</div>', unsafe_allow_html=True)
+        st.markdown("## Your mobility workspace")
+        st.markdown('<p class="zp-caption">Create an account or sign in to continue.</p>', unsafe_allow_html=True)
+        create_tab, sign_in_tab = st.tabs(["Create account", "Sign in"])
         with create_tab:
             with st.form("signup_form", clear_on_submit=False):
-                name = st.text_input("Name", placeholder="e.g. Alex Morgan")
+                name = st.text_input("Full name", placeholder="Alex Morgan")
                 email = st.text_input("Email address", placeholder="you@example.com")
-                password = st.text_input("Password", type="password", help="Use at least 6 characters.")
-                confirm = st.text_input("Confirm password", type="password")
-                submitted = st.form_submit_button("Create my account", type="primary", use_container_width=True)
+                password = st.text_input("Password", type="password", help="At least 6 characters.")
+                confirm_password = st.text_input("Confirm password", type="password")
+                submitted = st.form_submit_button("Create account", type="primary", use_container_width=True)
             if submitted:
-                if password != confirm:
+                normalized_email = email.strip().lower()
+                if len(name.strip()) < 3:
+                    st.error("Enter a name with at least 3 characters.")
+                elif not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", normalized_email):
+                    st.error("Enter a valid email address.")
+                elif len(password) < 6:
+                    st.error("Use a password with at least 6 characters.")
+                elif password != confirm_password:
                     st.error("The passwords do not match.")
-                elif len(name.strip()) < 3:
-                    st.error("Please enter a name with at least 3 characters.")
                 else:
                     try:
-                        with st.spinner("Creating your secure account…"):
-                            result = api_call("/auth/signup", "POST", {"username": name.strip(), "email": email.strip(), "password": password}, timeout=120)
-                        st.session_state["zp_token"] = result["access_token"]
-                        st.session_state["zp_username"] = result["username"]
-                        st.session_state["zp_email"] = result["email"]
-                        st.rerun()
+                        with st.spinner("Securely creating your account…"):
+                            result = api_call(
+                                "/auth/signup", "POST",
+                                {"username": name.strip(), "email": normalized_email, "password": password},
+                                timeout=120,
+                            )
+                        establish_session(result)
                     except requests.RequestException:
-                        st.error("The sign-up service is taking longer than expected. Please try again.")
+                        st.error("The account service is unavailable right now. Please retry; your details are not shown in this message.")
                     except RuntimeError as exc:
                         st.error(str(exc))
-        with login_tab:
+        with sign_in_tab:
             with st.form("login_form"):
-                identifier = st.text_input("Username or email", placeholder="Your account name")
+                identifier = st.text_input("Username or email", placeholder="you@example.com")
                 login_password = st.text_input("Password", type="password")
                 submitted = st.form_submit_button("Sign in", type="primary", use_container_width=True)
             if submitted:
                 try:
                     with st.spinner("Signing you in…"):
-                        result = api_call("/auth/login", "POST", {"username": identifier.strip(), "password": login_password}, timeout=120)
-                    st.session_state["zp_token"] = result["access_token"]
-                    st.session_state["zp_username"] = result["username"]
-                    st.session_state["zp_email"] = result["email"]
-                    st.rerun()
+                        result = api_call(
+                            "/auth/login", "POST",
+                            {"username": identifier.strip(), "password": login_password},
+                            timeout=120,
+                        )
+                    establish_session(result)
                 except requests.RequestException:
-                    st.error("The sign-in service is taking longer than expected. Please try again.")
+                    st.error("The sign-in service is unavailable right now. Please retry.")
                 except RuntimeError as exc:
                     st.error(str(exc))
-        st.caption("Your password is hashed by the API and is never stored in the dashboard session.")
+        st.caption("Passwords are stored as salted hashes. They are never saved in the dashboard session.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
 
 if not st.session_state.get("zp_token"):
     show_auth()
@@ -107,161 +151,323 @@ if not st.session_state.get("zp_token"):
 
 token = st.session_state["zp_token"]
 username = st.session_state.get("zp_username", "Rider")
-display_name = html.escape(username)
+safe_username = html.escape(username)
 
 with st.sidebar:
     st.markdown("## ZonePulse")
-    st.caption("NYC mobility intelligence")
+    st.caption("NYC mobility operations")
     st.divider()
-    page = st.radio("Workspace", ["Overview", "Book a ride", "My trips", "Demand lab"], label_visibility="collapsed")
+    page = st.radio(
+        "Workspace",
+        ["Overview", "Plan a ride", "Trip history", "Driver fleet", "Demand insights"],
+        label_visibility="collapsed",
+    )
     st.divider()
-    st.markdown(f"**{username}**")
+    st.markdown(f"**{safe_username}**")
     st.caption(st.session_state.get("zp_email", "Signed-in account"))
     if st.button("Sign out", use_container_width=True):
-        for key in ("zp_token", "zp_username", "zp_email", "ride_quote", "ride_route", "ride_tier"):
-            st.session_state.pop(key, None)
+        for key in list(st.session_state.keys()):
+            if key.startswith("zp_") or key.startswith("ride_"):
+                del st.session_state[key]
         st.rerun()
-    st.caption("Estimates are simulated for demonstration.")
+    st.caption("Driver availability and fare figures are estimates.")
 
-st.markdown(f'<div class="zp-hero"><div class="zp-eyebrow">ZonePulse / {page}</div><h1>{page if page != "Overview" else "Good to have you here, " + display_name + "."}</h1><p>Ride planning and demand signals for New York City.</p></div>', unsafe_allow_html=True)
+
+def page_header(title, description):
+    st.markdown(
+        f'<div class="zp-hero"><div class="zp-topline">ZonePulse / {html.escape(page)}</div>'
+        f'<h1>{title}</h1><p>{description}</p></div>',
+        unsafe_allow_html=True,
+    )
+
 
 def render_overview():
+    page_header(f"Welcome back, {safe_username}.", "Your trips, pickup activity, and city demand at a glance.")
     try:
         stats = api_call("/stats", token=token)
         peak = api_call("/peak-hours", token=token)
         info = api_call("/model-info", token=token)
+        trips = api_call("/ride/history", token=token)
+        fleet = api_call("/drivers", token=token)
     except (requests.RequestException, RuntimeError) as exc:
-        st.error(f"Could not load the mobility overview: {exc}")
+        st.error(f"Overview data could not be loaded: {exc}")
         return
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Historical records", f'{stats.get("total_records", 0):,}')
-    m2.metric("NYC zones", f'{stats.get("unique_locations", 0):,}')
-    m3.metric("Average hourly demand", f'{stats.get("demand_mean", 0):.1f}')
-    reg = (info.get("regression") or {}).get("results") or {}
-    best = reg.get("XGBoost_Regressor", {})
-    m4.metric("Forecast R²", f'{best.get("R2", 0):.1%}' if best else "—")
-    st.subheader("City rhythm")
-    c1, c2 = st.columns([1, 1], gap="large")
-    with c1:
-        st.markdown("#### Strongest demand window")
-        hours = peak.get("top_demand_hours", [])
-        st.metric("Evening peak", f'{min(hours):02d}:00–{max(hours):02d}:00' if hours else "—")
-        st.write(peak.get("insight", "Peak-hour information is unavailable."))
-        st.markdown("#### Quieter hours")
-        quiet = peak.get("low_demand_hours", [])
-        st.write(", ".join(f"{h:02d}:00" for h in quiet) if quiet else "—")
-    with c2:
-        st.markdown("#### What the forecast model reports")
-        st.write(f"Regression model: **{(info.get('regression') or {}).get('best_model', 'Unavailable')}**")
-        st.write(f"Demand classification: **{(info.get('classification') or {}).get('best_model', 'Unavailable')}**")
-        st.info("Ride availability, nearby drivers, and fare quotes are modeled estimates for this demonstration, not a live dispatch network.")
 
-def render_booking():
+    historical = stats.get("total_records", 0)
+    zones = stats.get("unique_locations", 0)
+    avg_demand = stats.get("demand_mean", 0)
+    st.subheader("Operating snapshot")
+    a, b, c, d = st.columns(4)
+    a.metric("Historical records", f"{historical:,}")
+    b.metric("Mapped zones", f"{zones:,}")
+    c.metric("Average hourly demand", f"{avg_demand:.1f}")
+    d.metric("Saved trips", f"{len(trips):,}")
+
+    left, right = st.columns([1.1, .9], gap="large")
+    with left:
+        st.markdown('<div class="zp-section"><h3>City rhythm</h3></div>', unsafe_allow_html=True)
+        hours = peak.get("top_demand_hours", [])
+        low_hours = peak.get("low_demand_hours", [])
+        st.metric("Peak window", f"{min(hours):02d}:00–{max(hours):02d}:00" if hours else "—")
+        st.write(peak.get("insight", "Peak-hour guidance is unavailable."))
+        st.caption("Quieter hours: " + (", ".join(f"{hour:02d}:00" for hour in low_hours) or "—"))
+    with right:
+        st.markdown('<div class="zp-section"><h3>Model and fleet</h3></div>', unsafe_allow_html=True)
+        regression = (info.get("regression") or {}).get("best_model", "Unavailable")
+        classifier = (info.get("classification") or {}).get("best_model", "Unavailable")
+        st.write(f"**Demand forecast**  ·  {regression}")
+        st.write(f"**Demand classification**  ·  {classifier}")
+        st.write(f"**Driver profiles recorded**  ·  {len(fleet)}")
+        st.caption("Driver profiles shown here are generated for this demonstration and are not a live dispatch fleet.")
+
+    st.markdown('<div class="zp-section"><h3>Recent trips</h3></div>', unsafe_allow_html=True)
+    if not trips:
+        st.info("Your confirmed trips will appear here.")
+    else:
+        for trip in trips[:4]:
+            with st.container(border=True):
+                route, details = st.columns([1.4, 1])
+                route.markdown(f"**{trip['pickup_address']}**  →  **{trip['dropoff_address']}**")
+                route.caption(f"{trip.get('created_at', 'Date unavailable')} · {trip.get('booking_id', '')}")
+                details.write(f"{trip.get('ride_tier', 'Ride')} · {trip.get('fare', 0):.2f} USD")
+                details.caption(f"{trip.get('status', 'Confirmed')} · Driver {trip.get('driver_name') or 'pending'}")
+
+
+def render_ride_planner():
+    page_header("Plan a ride", "Compare a route estimate, then save the confirmed trip to your account.")
     try:
-        landmarks = api_call("/landmarks", token=token)
+        landmarks = api_call("/landmarks")
     except (requests.RequestException, RuntimeError) as exc:
-        st.error(f"Could not load pickup locations: {exc}")
+        st.error(f"Pickup locations could not be loaded: {exc}")
         return
+    if not landmarks:
+        st.warning("No mapped locations are available.")
+        return
+
     names = [item["name"] for item in landmarks]
     by_name = {item["name"]: item for item in landmarks}
-    st.markdown("### Build a trip")
     with st.form("quote_form"):
-        a, b = st.columns(2)
-        with a:
-            pickup = st.selectbox("Pickup", names, index=names.index("Times Square, Manhattan") if "Times Square, Manhattan" in names else 0)
-        with b:
-            dropoff = st.selectbox("Destination", names, index=names.index("JFK International Airport (Terminal 4)") if "JFK International Airport (Terminal 4)" in names else min(1, len(names)-1))
-        c, d = st.columns(2)
-        with c:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            pickup = st.selectbox("Pickup location", names, index=names.index("Times Square, Manhattan") if "Times Square, Manhattan" in names else 0)
+        with col_b:
+            destination_index = names.index("JFK International Airport (Terminal 4)") if "JFK International Airport (Terminal 4)" in names else min(1, len(names) - 1)
+            destination = st.selectbox("Destination", names, index=destination_index)
+        col_c, col_d = st.columns(2)
+        with col_c:
             hour = st.slider("Pickup hour", 0, 23, 18, format="%d:00")
-        with d:
-            day = st.selectbox("Day", list(range(7)), index=4, format_func=lambda i: ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"][i])
-        make_quote = st.form_submit_button("Calculate ride estimate", type="primary")
-    if make_quote:
-        p, q = by_name[pickup], by_name[dropoff]
-        payload = {"passenger_name": username, "pickup_address": pickup, "pickup_lat": p["lat"], "pickup_lon": p["lon"], "dropoff_address": dropoff, "dropoff_lat": q["lat"], "dropoff_lon": q["lon"], "hour": hour, "day_of_week": day}
-        try:
-            with st.spinner("Estimating demand and fare…"):
-                quote = api_call("/ride/quote", "POST", payload, token=token, timeout=60)
-            st.session_state["ride_quote"] = quote
-            st.session_state["ride_route"] = payload
-            st.session_state["ride_tier"] = "Standard (UberX/Mini)"
-        except (requests.RequestException, RuntimeError) as exc:
-            st.error(f"Could not calculate this estimate: {exc}")
+        with col_d:
+            day = st.selectbox("Travel day", list(range(7)), index=4, format_func=lambda idx: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][idx])
+        quote_submitted = st.form_submit_button("Calculate estimate", type="primary")
+    if quote_submitted:
+        if pickup == destination:
+            st.error("Choose different pickup and destination locations.")
+        else:
+            start, end = by_name[pickup], by_name[destination]
+            payload = {
+                "passenger_name": username,
+                "pickup_address": pickup,
+                "pickup_lat": start["lat"],
+                "pickup_lon": start["lon"],
+                "dropoff_address": destination,
+                "dropoff_lat": end["lat"],
+                "dropoff_lon": end["lon"],
+                "hour": hour,
+                "day_of_week": day,
+            }
+            try:
+                with st.spinner("Preparing the route estimate…"):
+                    quote = api_call("/ride/quote", "POST", payload, token=token, timeout=90)
+                st.session_state["ride_quote"] = quote
+                st.session_state["ride_route"] = payload
+                st.session_state["ride_tier"] = "Standard (UberX/Mini)"
+                st.session_state["ride_driver"] = quote.get("nearby_drivers", [{}])[0]
+            except (requests.RequestException, RuntimeError) as exc:
+                st.error(f"The estimate could not be prepared: {exc}")
+
     quote = st.session_state.get("ride_quote")
     route = st.session_state.get("ride_route")
     if not quote or not route:
         return
-    st.divider()
-    st.markdown(f'#### {route["pickup_address"]}  →  {route["dropoff_address"]}')
-    x1, x2, x3, x4 = st.columns(4)
-    x1.metric("Estimated fare", f'{quote["fares"][st.session_state["ride_tier"]]:.2f} USD')
-    x2.metric("Distance", f'{quote["distance_km"]:.1f} km')
-    x3.metric("Driver wait", f'{quote["estimated_wait_time_minutes"]} min')
-    x4.metric("Find-a-car estimate", f'{quote["probability_finding_car_pct"]:.0f}%')
-    st.write(f'Demand tier: **{quote["demand_tier"]}** · Estimated demand: **{quote["predicted_hourly_demand"]} rides/hour** · Surge factor: **{quote["surge_multiplier"]:.2f}×**')
-    tier = st.radio("Ride option", list(quote["fares"]), horizontal=True, format_func=lambda label: f"{label} · {quote['fares'][label]:.2f} USD", key="ride_tier")
-    phone = st.text_input("Contact number (optional)", value="")
-    if st.button("Confirm demonstration booking", type="primary"):
-        driver = quote.get("nearby_drivers", [{}])[0]
-        booking = {"passenger_name": username, "phone": phone, "pickup_address": route["pickup_address"], "pickup_lat": route["pickup_lat"], "pickup_lon": route["pickup_lon"], "dropoff_address": route["dropoff_address"], "dropoff_lat": route["dropoff_lat"], "dropoff_lon": route["dropoff_lon"], "distance_km": quote["distance_km"], "duration_mins": quote["duration_minutes"], "ride_tier": tier, "fare": quote["fares"][tier], "driver_name": driver.get("name", "Assigned driver"), "driver_rating": driver.get("rating", 4.9), "car_model": driver.get("car_model", "Standard vehicle"), "car_plate": driver.get("plate", "—"), "eta_mins": quote["estimated_wait_time_minutes"]}
-        try:
-            result = api_call("/ride/book", "POST", booking, token=token, timeout=30)
-            st.success(result.get("message", "Booking saved."))
-            st.json(result.get("booking", {}))
-        except (requests.RequestException, RuntimeError) as exc:
-            st.error(f"Booking could not be saved: {exc}")
 
-def render_trips():
+    st.markdown('<div class="zp-section"><h3>Estimate details</h3></div>', unsafe_allow_html=True)
+    route_col, metric_col = st.columns([1.1, 1.4], gap="large")
+    with route_col:
+        st.markdown(f"**{route['pickup_address']}**  →  **{route['dropoff_address']}**")
+        st.caption(f"Approx. {quote['distance_km']:.1f} km · {quote['duration_minutes']} min")
+        st.markdown(f"<span class='zp-status'>{html.escape(quote['demand_tier'])} demand</span>", unsafe_allow_html=True)
+        st.write(quote.get("availability_status", "Availability estimate"))
+    with metric_col:
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Pickup wait", f"{quote['estimated_wait_time_minutes']} min")
+        m2.metric("Find-a-car estimate", f"{quote['probability_finding_car_pct']:.0f}%")
+        m3.metric("Surge factor", f"{quote['surge_multiplier']:.2f}×")
+
+    tiers = list(quote["fares"])
+    selected_tier = st.radio(
+        "Ride option",
+        tiers,
+        horizontal=True,
+        key="ride_tier",
+        format_func=lambda tier: f"{tier} · {quote['fares'][tier]:.2f} USD",
+    )
+    drivers = quote.get("nearby_drivers", [])
+    selected_driver = st.selectbox(
+        "Suggested driver",
+        drivers,
+        format_func=lambda item: f"{item['name']} · {item['car_model']} · {item['eta_minutes']} min away · ★ {item['rating']}",
+        key="ride_driver",
+    )
+    with st.form("confirm_ride_form"):
+        phone = st.text_input("Passenger contact number (optional)", placeholder="Add a number for this trip")
+        confirm = st.form_submit_button("Confirm and save trip", type="primary")
+    if confirm:
+        booking = {
+            **route,
+            "passenger_name": username,
+            "phone": phone.strip() or None,
+            "distance_km": quote["distance_km"],
+            "duration_mins": quote["duration_minutes"],
+            "ride_tier": selected_tier,
+            "fare": quote["fares"][selected_tier],
+            "driver_id": selected_driver.get("driver_id"),
+            "driver_name": selected_driver.get("name"),
+            "driver_rating": selected_driver.get("rating"),
+            "car_model": selected_driver.get("car_model"),
+            "car_color": selected_driver.get("car_color"),
+            "car_plate": selected_driver.get("plate"),
+            "driver_lat": selected_driver.get("lat"),
+            "driver_lon": selected_driver.get("lon"),
+            "driver_distance_km": selected_driver.get("distance_km"),
+            "eta_mins": selected_driver.get("eta_minutes", quote["estimated_wait_time_minutes"]),
+        }
+        try:
+            result = api_call("/ride/book", "POST", booking, token=token, timeout=60)
+            st.success(f"Trip saved · {result['booking']['booking_id']}")
+            st.session_state.pop("ride_quote", None)
+            st.session_state.pop("ride_route", None)
+            st.session_state.pop("ride_driver", None)
+            st.rerun()
+        except (requests.RequestException, RuntimeError) as exc:
+            st.error(f"Trip could not be saved: {exc}")
+
+
+def render_trip_history():
+    page_header("Trip history", "A private record of rides saved to your passenger account.")
     try:
         trips = api_call("/ride/history", token=token)
     except (requests.RequestException, RuntimeError) as exc:
-        st.error(f"Could not load your trips: {exc}")
+        st.error(f"Trip history could not be loaded: {exc}")
         return
-    st.subheader("Your recent bookings")
     if not trips:
-        st.info("No bookings yet. Your trip history will appear here.")
+        st.info("No trips have been confirmed yet. Start with Plan a ride.")
         return
+    st.caption(f"{len(trips)} saved trip{'s' if len(trips) != 1 else ''}")
     for trip in trips:
-        title = f'{trip.get("pickup_address", "Pickup")} → {trip.get("dropoff_address", "Destination")} · {trip.get("fare", 0):.2f} USD'
+        title = f"{trip.get('pickup_address', 'Pickup')}  →  {trip.get('dropoff_address', 'Destination')}  ·  {trip.get('fare', 0):.2f} USD"
         with st.expander(title):
-            st.write(f'**Status:** {trip.get("status", "Confirmed")} · **Ride:** {trip.get("ride_tier", "Standard")}')
-            st.write(f'**Distance:** {trip.get("distance_km", 0)} km · **Duration:** {trip.get("duration_mins", 0)} min')
-            st.write(f'**Booking reference:** {trip.get("booking_id", "—")}')
+            left, right = st.columns(2)
+            left.write(f"**Booking reference**  ·  {trip.get('booking_id', '—')}")
+            left.write(f"**Booked at**  ·  {trip.get('created_at', '—')}")
+            left.write(f"**Ride option**  ·  {trip.get('ride_tier', '—')}")
+            left.write(f"**Distance / time**  ·  {trip.get('distance_km', 0):.1f} km / {trip.get('duration_mins', 0)} min")
+            right.write(f"**Driver**  ·  {trip.get('driver_name') or '—'}")
+            right.write(f"**Vehicle**  ·  {trip.get('car_color') or ''} {trip.get('car_model') or '—'}")
+            right.write(f"**Plate**  ·  {trip.get('car_plate') or '—'}")
+            right.write(f"**Status**  ·  {trip.get('status', 'Confirmed')}")
 
-def render_demand_lab():
-    st.markdown("### Forecast demand by zone and time")
+
+def render_fleet():
+    page_header("Driver fleet", "Recorded driver profiles and vehicle details associated with ride estimates.")
+    st.info("This is a simulated portfolio fleet. It is not a live driver dispatch service.")
+    try:
+        rows = api_call("/drivers", token=token)
+    except (requests.RequestException, RuntimeError) as exc:
+        st.error(f"Driver records could not be loaded: {exc}")
+        return
+    if not rows:
+        st.info("Driver profiles are recorded after you calculate a ride estimate.")
+        return
+    columns = ["driver_id", "name", "rating", "car_model", "car_color", "license_plate", "eta_minutes", "status"]
+    st.dataframe(
+        [{col: row.get(col) for col in columns} for row in rows],
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "driver_id": "Driver ref",
+            "name": "Driver",
+            "rating": st.column_config.NumberColumn("Rating", format="%.2f ★"),
+            "car_model": "Vehicle",
+            "car_color": "Color",
+            "license_plate": "Plate",
+            "eta_minutes": st.column_config.NumberColumn("ETA", format="%d min"),
+            "status": "Status",
+        },
+    )
+
+
+def render_demand_insights():
+    page_header("Demand insights", "Explore the demand model using a zone and pickup time.")
     with st.form("forecast_form"):
-        a, b, c = st.columns(3)
-        with a:
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
             location = st.number_input("Location code", min_value=0, max_value=10000, value=100, step=1)
-        with b:
-            hour = st.slider("Hour", 0, 23, 18)
-        with c:
-            day = st.selectbox("Day of week", list(range(7)), index=4, format_func=lambda i: ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"][i])
-        month = st.selectbox("Month", list(range(1,13)), index=5)
-        run = st.form_submit_button("Run demand forecast", type="primary")
+        with col_b:
+            hour = st.slider("Hour of day", 0, 23, 18)
+        with col_c:
+            day = st.selectbox("Day of week", list(range(7)), index=4, format_func=lambda idx: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][idx])
+        month = st.selectbox("Month", list(range(1, 13)), index=5)
+        run = st.form_submit_button("Run forecast", type="primary")
     if run:
-        params = {"location_code": int(location), "hour": hour, "day_of_week": day, "month": month, "is_weekend": int(day >= 5), "hour_bin": hour // 3, "cluster": 0}
+        params = {
+            "location_code": int(location),
+            "hour": hour,
+            "day_of_week": day,
+            "month": month,
+            "is_weekend": int(day >= 5),
+            "hour_bin": hour // 3,
+            "cluster": 0,
+        }
         try:
-            response = requests.get(f"{API_BASE_URL}/predict", params=params, headers={"Authorization": f"Bearer {token}"}, timeout=60)
+            prediction = api_call("/predict", token=token)
+        except Exception:
+            prediction = None
+        try:
+            response = requests.get(
+                f"{API_BASE_URL}/predict",
+                params=params,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=90,
+            )
             if not response.ok:
-                raise RuntimeError(response.json().get("detail", "Forecast request failed."))
+                detail = response.json().get("detail", "Forecast request failed.")
+                raise RuntimeError(str(detail))
             prediction = response.json()
-            classification = requests.get(f"{API_BASE_URL}/classify", params=params, headers={"Authorization": f"Bearer {token}"}, timeout=60)
-            category = classification.json() if classification.ok else {}
-            st.metric("Predicted hourly demand", f'{prediction.get("predicted_demand", 0):.1f}')
-            st.write(f'**Demand tier:** {category.get("demand_category", "Unavailable")} · {category.get("recommended_action", "")}')
+            classification_response = requests.get(
+                f"{API_BASE_URL}/classify",
+                params=params,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=90,
+            )
+            classification = classification_response.json() if classification_response.ok else {}
+            result_a, result_b = st.columns(2)
+            result_a.metric("Predicted hourly demand", f"{prediction.get('predicted_demand', 0):.1f}")
+            result_b.metric("Demand category", classification.get("demand_category", "Unavailable"))
+            st.write(classification.get("recommended_action", prediction.get("interpretation", "")))
         except (requests.RequestException, RuntimeError, ValueError) as exc:
-            st.error(f"Forecast unavailable: {exc}")
+            st.error(f"The forecast could not be calculated: {exc}")
+
 
 if page == "Overview":
     render_overview()
-elif page == "Book a ride":
-    render_booking()
-elif page == "My trips":
-    render_trips()
+elif page == "Plan a ride":
+    render_ride_planner()
+elif page == "Trip history":
+    render_trip_history()
+elif page == "Driver fleet":
+    render_fleet()
 else:
-    render_demand_lab()
+    render_demand_insights()
+
 st.divider()
-st.caption("ZonePulse · NYC ride demand and booking demonstration · Estimates are simulated.")
+st.caption("ZonePulse · NYC mobility intelligence · Driver availability and ride quotes are estimates.")
