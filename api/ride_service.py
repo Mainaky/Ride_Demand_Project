@@ -257,92 +257,37 @@ def compute_ride_quote(
     }
 
 
-# ── 6. Persistent Ride Bookings Database (SQLite) ──────────────────────────────
-import sqlite3
+# ── 6. PostgreSQL-backed ride and driver records ────────────────────────────
 
-BOOKING_DB = os.getenv("BOOKINGS_DB_PATH", os.path.join(os.getenv("ZONEPULSE_DATA_DIR", os.path.dirname(__file__)), "bookings.db"))
-
-def init_booking_db():
-    with sqlite3.connect(BOOKING_DB) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS bookings (
-                booking_id TEXT PRIMARY KEY,
-                passenger_name TEXT NOT NULL,
-                phone TEXT,
-                pickup_address TEXT NOT NULL,
-                pickup_lat REAL,
-                pickup_lon REAL,
-                dropoff_address TEXT NOT NULL,
-                dropoff_lat REAL,
-                dropoff_lon REAL,
-                distance_km REAL,
-                duration_mins INTEGER,
-                ride_tier TEXT,
-                fare REAL,
-                driver_name TEXT,
-                driver_rating REAL,
-                car_model TEXT,
-                car_plate TEXT,
-                eta_mins INTEGER,
-                status TEXT DEFAULT 'Confirmed',
-                created_at REAL NOT NULL
-            )
-        """)
-        conn.commit()
-
-
-def save_booking(data: dict) -> dict:
-    init_booking_db()
-    booking_id = f"ZP-NYC-{random.randint(10000, 99999)}"
-    now = time.time()
-    with sqlite3.connect(BOOKING_DB) as conn:
-        conn.execute("""
-            INSERT INTO bookings (
-                booking_id, passenger_name, phone,
-                pickup_address, pickup_lat, pickup_lon,
-                dropoff_address, dropoff_lat, dropoff_lon,
-                distance_km, duration_mins, ride_tier, fare,
-                driver_name, driver_rating, car_model, car_plate,
-                eta_mins, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            booking_id,
-            data.get("passenger_name", "Valued Passenger"),
-            data.get("phone", "+1 (212) 555-0199"),
-            data.get("pickup_address", "Pickup Location"),
-            data.get("pickup_lat", 40.7580),
-            data.get("pickup_lon", -73.9855),
-            data.get("dropoff_address", "Dropoff Destination"),
-            data.get("dropoff_lat", 40.6413),
-            data.get("dropoff_lon", -73.7781),
-            data.get("distance_km", 10.0),
-            data.get("duration_mins", 25),
-            data.get("ride_tier", "Standard (UberX)"),
-            data.get("fare", 28.50),
-            data.get("driver_name", "Carlos M."),
-            data.get("driver_rating", 4.93),
-            data.get("car_model", "Toyota Camry Hybrid"),
-            data.get("car_plate", "TLC #8M12"),
-            data.get("eta_mins", 3),
-            "Driver En Route",
-            now,
-        ))
-        conn.commit()
-
-    data["booking_id"] = booking_id
-    data["status"] = "Driver En Route"
-    data["created_at"] = now
-    return data
+def save_booking(data: dict, passenger_username: str = None) -> dict:
+    try:
+        from api.storage import save_booking as persist_booking
+    except ImportError:
+        from storage import save_booking as persist_booking
+    return persist_booking(data, passenger_username or data.get("passenger_name", ""))
 
 
 def get_bookings(passenger_name: str = None) -> list:
-    init_booking_db()
-    with sqlite3.connect(BOOKING_DB) as conn:
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        if passenger_name:
-            cursor.execute("SELECT * FROM bookings WHERE LOWER(passenger_name) = ? ORDER BY created_at DESC", (passenger_name.strip().lower(),))
-        else:
-            cursor.execute("SELECT * FROM bookings ORDER BY created_at DESC LIMIT 50")
-        rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+    if not passenger_name:
+        return []
+    try:
+        from api.storage import list_bookings
+    except ImportError:
+        from storage import list_bookings
+    return list_bookings(passenger_name)
+
+
+def save_quote_drivers(driver_rows: list[dict]) -> None:
+    try:
+        from api.storage import upsert_quote_drivers
+    except ImportError:
+        from storage import upsert_quote_drivers
+    upsert_quote_drivers(driver_rows)
+
+
+def get_driver_fleet() -> list[dict]:
+    try:
+        from api.storage import list_drivers
+    except ImportError:
+        from storage import list_drivers
+    return list_drivers()

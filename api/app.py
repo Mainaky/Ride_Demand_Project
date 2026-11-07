@@ -112,7 +112,7 @@ class RideQuoteRequest(BaseModel):
 
 class RideBookingRequest(BaseModel):
     passenger_name: str
-    phone: Optional[str] = "+1 (212) 555-0199"
+    phone: Optional[str] = None
     pickup_address: str
     pickup_lat: float
     pickup_lon: float
@@ -123,11 +123,20 @@ class RideBookingRequest(BaseModel):
     duration_mins: int
     ride_tier: str = "Standard (UberX/Mini)"
     fare: float
+    driver_id: Optional[str] = None
     driver_name: Optional[str] = "Michael A."
     driver_rating: Optional[float] = 4.95
     car_model: Optional[str] = "Toyota Camry Hybrid"
+    car_color: Optional[str] = None
     car_plate: Optional[str] = "TLC #7K82"
+    driver_lat: Optional[float] = None
+    driver_lon: Optional[float] = None
+    driver_distance_km: Optional[float] = None
     eta_mins: Optional[int] = 3
+    predicted_hourly_demand: Optional[float] = None
+    demand_tier: Optional[str] = None
+    surge_multiplier: Optional[float] = None
+    probability_finding_car_pct: Optional[float] = None
 
 
 # ── Operational ML Schemas ────────────────────────────────────────────────────
@@ -167,13 +176,14 @@ def root():
     return {
         "status": "ok",
         "service": "ZonePulse Ride Demand & Booking API",
-        "version": "2.5.0",
+        "version": "2.6.0",
         "endpoints": {
             "health":         "GET /",
             "landmarks":      "GET /landmarks",
             "ride_quote":     "POST /ride/quote",
             "ride_book":      "POST /ride/book",
             "ride_history":   "GET /ride/history",
+            "drivers":        "GET /drivers",
             "auth_signup":    "POST /auth/signup",
             "auth_login":     "POST /auth/login",
             "auth_me":        "GET /auth/me",
@@ -213,6 +223,7 @@ def quote_ride(req: RideQuoteRequest, user: dict = Depends(require_current_user)
         hour=req.hour,
         day_of_week=req.day_of_week,
     )
+    _get_ride_service().save_quote_drivers(quote.get("nearby_drivers", []))
     quote["passenger_name"] = req.passenger_name
     quote["pickup_address"] = req.pickup_address
     quote["dropoff_address"] = req.dropoff_address
@@ -224,7 +235,7 @@ def book_ride(req: RideBookingRequest, user: dict = Depends(require_current_user
     """Confirm and persist a ride booking for the signed-in account."""
     booking_data = req.model_dump()
     booking_data["passenger_name"] = user["sub"]
-    booking_record = _get_ride_service().save_booking(booking_data)
+    booking_record = _get_ride_service().save_booking(booking_data, user["sub"])
     return {
         "status": "Booking Confirmed",
         "message": f"Your ride has been confirmed! Driver {req.driver_name} is arriving in {req.eta_mins} minutes.",
@@ -236,6 +247,12 @@ def book_ride(req: RideBookingRequest, user: dict = Depends(require_current_user
 def ride_history(user: dict = Depends(require_current_user)):
     """Retrieve only the signed-in user's historical bookings."""
     return _get_ride_service().get_bookings(user["sub"])
+
+
+@app.get("/drivers")
+def driver_fleet(user: dict = Depends(require_current_user)):
+    """Return persisted fleet profiles observed by the signed-in rider."""
+    return _get_ride_service().get_driver_fleet()
 
 
 # ── Auth Endpoints ────────────────────────────────────────────────────────────
@@ -260,7 +277,21 @@ def login(req: LoginRequest):
 def me(user: Optional[dict] = Depends(get_current_user)):
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Valid token required")
-    return {"username": user.get("sub"), "role": user.get("role")}
+    try:
+        from api.storage import get_passenger
+    except ImportError:
+        from storage import get_passenger
+    passenger = get_passenger(user.get("sub", ""))
+    if not passenger:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Passenger account not found")
+    return {
+        "username": passenger["username"],
+        "full_name": passenger["full_name"],
+        "email": passenger["email"],
+        "phone": passenger.get("phone"),
+        "role": passenger["role"],
+        "created_at": passenger["created_at"].isoformat() if passenger.get("created_at") else None,
+    }
 
 
 # ── Prediction Endpoints ──────────────────────────────────────────────────────

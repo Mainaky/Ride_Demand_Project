@@ -1,85 +1,66 @@
-"""User authentication and persistent SQLite storage for ZonePulse Ride Demand API."""
-
+"""Authentication helpers backed by the shared PostgreSQL passenger table."""
 from __future__ import annotations
 
 import base64
 import hashlib
 import hmac
 import json
-import logging
 import os
 import re
 import secrets
-import sqlite3
 import time
-from pathlib import Path
 from typing import Optional
-from pydantic import BaseModel, Field, field_validator
 
-LOGGER = logging.getLogger("zonepulse_auth")
-DATA_DIR = Path(os.getenv("ZONEPULSE_DATA_DIR", str(Path(__file__).resolve().parent)))
-DB_PATH = Path(os.getenv("USER_DB_PATH", str(DATA_DIR / "users.db")))
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import insert, or_, select
+from sqlalchemy.exc import IntegrityError
+
+try:
+    from api.storage import engine, initialize_schema, passengers
+except ImportError:
+    from storage import engine, initialize_schema, passengers
+
 SECRET_KEY = os.getenv("JWT_SECRET_KEY") or secrets.token_hex(32)
 
 
 def init_db() -> None:
-    """Create the users table if it does not already exist."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                email TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                role TEXT DEFAULT 'Mobility Operations Analyst',
-                created_at REAL NOT NULL
-            )
-        """)
-        conn.commit()
+    initialize_schema()
 
 
 def hash_password(password: str) -> str:
-    """Hash password using PBKDF2-HMAC-SHA256 with a unique salt."""
+    """Store only a salted PBKDF2-HMAC-SHA256 password digest."""
     salt = secrets.token_hex(16)
-    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000)
-    return f"{salt}${dk.hex()}"
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000)
+    return salt + "$" + digest.hex()
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
-    """Verify password against stored salt$hash."""
     try:
-        salt, dk_hex = stored_hash.split("$")
-        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000)
-        return hmac.compare_digest(dk.hex(), dk_hex)
-    except Exception:
+        salt, digest_hex = stored_hash.split("$", 1)
+        digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000)
+        return hmac.compare_digest(digest.hex(), digest_hex)
+    except (ValueError, TypeError):
         return False
 
 
 def create_token(username: str, role: str) -> str:
-    """Create an HMAC-SHA256 signed bearer token with a 7-day expiration."""
-    payload = {
-        "sub": username,
-        "role": role,
-        "exp": int(time.time()) + (7 * 86400),
-    }
-    payload_json = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    payload_part = base64.urlsafe_b64encode(payload_json).decode("ascii").rstrip("=")
+    payload = {"sub": username, "role": role, "exp": int(time.time()) + 7 * 86400}
+    payload_part = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii").rstrip("=")
     signature = hmac.new(SECRET_KEY.encode("utf-8"), payload_part.encode("ascii"), hashlib.sha256).digest()
     signature_part = base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
     return f"{payload_part}.{signature_part}"
 
 
 def decode_token(token: str) -> Optional[dict]:
-    """Verify the HMAC signature and expiry before accepting a token."""
     try:
         payload_part, signature_part = token.split(".", 1)
         expected = hmac.new(SECRET_KEY.encode("utf-8"), payload_part.encode("ascii"), hashlib.sha256).digest()
         supplied = base64.urlsafe_b64decode(signature_part + "=" * (-len(signature_part) % 4))
         if not hmac.compare_digest(expected, supplied):
             return None
-        payload_json = base64.urlsafe_b64decode(payload_part + "=" * (-len(payload_part) % 4))
-        payload = json.loads(payload_json.decode("utf-8"))
+        payload = json.loads(base64.urlsafe_b64decode(payload_part + "=" * (-len(payload_part) % 4)))
         if not isinstance(payload, dict) or not payload.get("sub") or payload.get("exp", 0) < time.time():
             return None
         return payload
@@ -94,15 +75,15 @@ class SignUpRequest(BaseModel):
 
     @field_validator("email")
     @classmethod
-    def validate_email_format(cls, v: str) -> str:
-        clean = v.strip().lower()
+    def validate_email_format(cls, value: str) -> str:
+        clean = value.strip().lower()
         if not re.match(r"^[^@]+@[^@]+\.[^@]+$", clean):
             raise ValueError("Invalid email address format")
         return clean
 
 
 class LoginRequest(BaseModel):
-    username: str = Field(min_length=1, max_length=50)
+    username: str = Field(min_length=1, max_length=120)
     password: str = Field(min_length=1, max_length=100)
 
 
@@ -110,63 +91,65 @@ class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     username: str
+    full_name: str
     email: str
     role: str
     message: str
 
 
-def register_user(req: SignUpRequest) -> AuthResponse:
-    init_db()
-    clean_username = req.username.strip().lower()
-    clean_email = req.email.strip().lower()
-
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM users WHERE username = ? OR email = ?", (clean_username, clean_email))
-        if cursor.fetchone():
-            raise ValueError("Username or email is already registered")
-
-        pwd_hash = hash_password(req.password)
-        role = "Mobility Operations Analyst"
-        cursor.execute(
-            "INSERT INTO users (username, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)",
-            (clean_username, clean_email, pwd_hash, role, time.time()),
-        )
-        conn.commit()
-
-    token = create_token(clean_username, role)
+def _response(username: str, full_name: str, email: str, role: str, message: str) -> AuthResponse:
     return AuthResponse(
-        access_token=token,
-        username=clean_username,
-        email=clean_email,
+        access_token=create_token(username, role),
+        username=username,
+        full_name=full_name,
+        email=email,
         role=role,
-        message="Account created successfully",
+        message=message,
     )
+
+
+def register_user(req: SignUpRequest) -> AuthResponse:
+    full_name = req.username.strip()
+    username = full_name.lower()
+    email = req.email.strip().lower()
+    role = "Mobility Operations Analyst"
+
+    with engine.connect() as conn:
+        existing = conn.execute(
+            select(passengers).where(or_(passengers.c.username == username, passengers.c.email == email))
+        ).mappings().first()
+
+    # A retry after a dropped signup response safely resumes only the exact same account.
+    if existing:
+        if existing["username"] == username and existing["email"] == email and verify_password(req.password, existing["password_hash"]):
+            return _response(existing["username"], existing["full_name"], existing["email"], existing["role"], "Account ready")
+        raise ValueError("Username or email is already registered")
+
+    password_hash = hash_password(req.password)
+    try:
+        with engine.begin() as conn:
+            conn.execute(insert(passengers).values(
+                username=username,
+                full_name=full_name,
+                email=email,
+                password_hash=password_hash,
+                role=role,
+            ))
+    except IntegrityError:
+        raise ValueError("Username or email is already registered")
+
+    return _response(username, full_name, email, role, "Account created successfully")
 
 
 def authenticate_user(req: LoginRequest) -> AuthResponse:
-    init_db()
     identifier = req.username.strip().lower()
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(passengers).where(
+                or_(passengers.c.username == identifier, passengers.c.email == identifier)
+            )
+        ).mappings().first()
 
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT username, email, password_hash, role FROM users WHERE username = ? OR email = ?",
-            (identifier, identifier),
-        )
-        row = cursor.fetchone()
-        if not row:
-            raise ValueError("Invalid username or password")
-
-        username, email, stored_hash, role = row
-        if not verify_password(req.password, stored_hash):
-            raise ValueError("Invalid username or password")
-
-    token = create_token(username, role)
-    return AuthResponse(
-        access_token=token,
-        username=username,
-        email=email,
-        role=role,
-        message="Authentication successful",
-    )
+    if not row or not verify_password(req.password, row["password_hash"]):
+        raise ValueError("Invalid username or password")
+    return _response(row["username"], row["full_name"], row["email"], row["role"], "Authentication successful")

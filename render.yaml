@@ -14,6 +14,10 @@ services:
         value: 3.11.10
       - key: JWT_SECRET_KEY
         generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: zonepulse-db
+          property: connectionString
 
   - type: web
     name: Ride_Demand_Project
@@ -31,3 +35,10 @@ services:
       # Free Render web services cannot receive private network requests.
       - key: API_BASE_URL
         value: https://zonepulse-api-mmyw.onrender.com
+
+databases:
+  - name: zonepulse-db
+    databaseName: zonepulse
+    user: zonepulse
+    plan: free
+    region: oregon
