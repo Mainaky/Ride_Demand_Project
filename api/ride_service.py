@@ -260,7 +260,7 @@ def compute_ride_quote(
 # ── 6. Persistent Ride Bookings Database (SQLite) ──────────────────────────────
 import sqlite3
 
-BOOKING_DB = os.path.join(os.path.dirname(__file__), "bookings.db")
+BOOKING_DB = os.getenv("BOOKINGS_DB_PATH", os.path.join(os.getenv("ZONEPULSE_DATA_DIR", os.path.dirname(__file__)), "bookings.db"))
 
 def init_booking_db():
     with sqlite3.connect(BOOKING_DB) as conn:
