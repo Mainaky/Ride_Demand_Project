@@ -22,6 +22,10 @@ data/processed/*.png
 api/*.db
 *.db
 .env
+.env.*
+!.env.example
+node_modules/
+npm-debug.log*
 *.pem
 *.key
 

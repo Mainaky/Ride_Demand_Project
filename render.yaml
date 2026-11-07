@@ -21,20 +21,25 @@ services:
 
   - type: web
     name: Ride_Demand_Project
-    runtime: python
+    runtime: node
     plan: free
     region: oregon
     branch: main
-    buildCommand: pip install -r requirements-dashboard.txt
-    startCommand: streamlit run dashboard/app.py --server.address 0.0.0.0 --server.port $PORT --server.headless true
-    healthCheckPath: /_stcore/health
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
     autoDeployTrigger: commit
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.10
-      # Free Render web services cannot receive private network requests.
-      - key: API_BASE_URL
-        value: https://zonepulse-api-mmyw.onrender.com
+      - key: NODE_VERSION
+        value: 22.16.0
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: zonepulse-db
+          property: connectionString
 
 databases:
   - name: zonepulse-db

@@ -1,7 +1,7 @@
 # ZonePulse: Ride Demand Prediction & Surge Pricing System
 ### Global mobility planning · NYC-trained demand intelligence · Full-Stack Cloud Deployment
 
-> Portfolio mobility planning system. It processes NYC ride-hailing records, loads data into Snowflake, and serves authenticated planning estimates through FastAPI and a Streamlit dashboard. Worldwide address search accepts global places. The demand model is trained on NYC data only: other locations receive a clearly labeled time-of-week baseline, not a claim of locally trained prediction.
+> ZonePulse is a full-stack Node.js ride planning app with a responsive JavaScript frontend, Express API, and PostgreSQL account and ride storage. The Python ETL and model training pipeline remains available for research; the live Node app uses transparent global planning estimates.
 
 ---
 
@@ -10,27 +10,27 @@
 ```text
                ┌────────────────────────────────────────────────────────┐
                │              CLIENT / WEB BROWSER                      │
-               │  Streamlit UI (Port 8501 / Render Web Service)         │
+               │  Responsive JavaScript UI (Node.js web service)        │
                └──────────────────────────┬─────────────────────────────┘
                                           │
                   HTTPS Requests / Bearer JWT Authentication
                                           │
                                           ▼
                ┌────────────────────────────────────────────────────────┐
-               │              BACKEND REST MICROSERVICE                 │
-               │  FastAPI (Port 8000 / Render Web Service)              │
+               │           EXPRESS API + STATIC FRONTEND                │
+               │  Single Node.js web service (one public origin)        │
                ├──────────────────────────┬─────────────────────────────┤
-               │  • /auth/signup          │  • /predict (Regression)    │
-               │  • /auth/login           │  • /classify (Surge Tier)   │
-               │  • /auth/me              │  • /predict/batch (x1000)   │
-               │  • /stats & /model-info  │  • /docs (OpenAPI Swagger)  │
+               │  • /api/auth/signup      │  • /api/ride/quote          │
+               │  • /api/auth/login       │  • /api/ride/book           │
+               │  • /api/auth/me          │  • /api/ride/history        │
+               │  • /api/weather          │  • /api/geocode             │
                └─────────────┬────────────────────────────┬─────────────┘
                              │                            │
                              ▼                            ▼
                ┌──────────────────────────┐  ┌──────────────────────────┐
                │   RENDER POSTGRESQL     │  │   SNOWFLAKE CLOUD DWH    │
                │ Passengers · Drivers    │  │   UBER_PROJECT.RIDE_DATA │
-               │ Rides · PBKDF2 hashes   │  │   write_pandas Ingestion │
+               │ Rides · bcrypt hashes   │  │   write_pandas Ingestion │
                └──────────────────────────┘  └──────────────────────────┘
 ```
 
@@ -39,7 +39,7 @@
 ## 🌟 Key Features
 
 1. **Passenger accounts and authentication:**
-   - Passenger names, email addresses, optional contact numbers, salted PBKDF2-HMAC-SHA256 password hashes, and account timestamps are stored in PostgreSQL.
+   - Passenger names, email addresses, optional contact numbers, password hashes, and account timestamps are stored in PostgreSQL. Existing PBKDF2 password hashes are verified and upgraded to bcrypt after a successful sign-in.
    - Login issues signed bearer tokens with a 7-day expiration.
    - Retried account creation safely resumes the same account after a delayed response.
 2. **PostgreSQL ride records:**
@@ -48,7 +48,8 @@
    - Driver availability is simulated for this portfolio application and is not a live dispatch network.
 3. **Global location planning:**
    - Worldwide addresses and landmarks are resolved with the [Photon geocoding API](https://github.com/komoot/photon/blob/master/docs/api-v1.md). Its public demo service may throttle heavy use and has no availability guarantee.
-   - In the New York training area, demand outputs use the trained model. Elsewhere, the app shows a transparent time-of-week planning baseline until regional training data is available.
+   - Current pickup weather and local time are fetched globally from [Open-Meteo](https://open-meteo.com/) using the selected coordinates; no API key is required.
+   - The Node app displays a transparent time-of-week planning baseline worldwide; its Python ML assets remain in the repository for model research.
    - Route distances and estimated fares are shown as USD-equivalent planning estimates, not local market rates or live ride quotes.
 4. **Dual Machine Learning Engine:**
    - **Regression Track (XGBoost):** Explains **79.3% of demand variance** ($R^2 = 0.7930$, $\text{MAE} = 7.97$ rides) to forecast exact ride counts for driver capacity sizing.
@@ -65,13 +66,15 @@
 
 ## Passenger, driver, and ride storage
 
-Render's Blueprint provisions PostgreSQL and connects it to the API through the internal database URL. The schema contains:
+Render's Blueprint connects the Node app to PostgreSQL through the internal database URL. The schema contains:
 
 - `passengers`: display name, sign-in username, email, optional phone, password hash, role, and creation time.
 - `drivers`: simulated driver reference, rating, vehicle, color, plate, latest location estimate, ETA, and status.
 - `rides`: passenger and driver references plus route coordinates, fare, ride tier, demand and availability estimates, booking status, and timestamp.
 
-Only password hashes are stored. A contact number is optional; when supplied for a booking, it is saved to the passenger profile and on that trip.
+Only password hashes are stored. New passwords use bcrypt; existing PBKDF2 hashes are checked on sign-in and upgraded automatically. A contact number is optional; when supplied for a booking, it is saved to the passenger profile and trip record.
+
+Sign in with either the account username (the name entered at signup) or account email, plus the original password. Accounts persist only in the database currently configured for the API. If a deployment switches from an earlier SQLite store or PostgreSQL database to a newly provisioned database, old accounts do not move automatically; they must be migrated from the original store while it is still available. Password hashes cannot recover a forgotten password.
 
 **Current Render selection:** Free PostgreSQL is temporary. Render expires it 30 days after creation; after a further 14-day recovery window, its data is deleted. Upgrade the database before expiry or export the records you need to keep.
 
@@ -79,37 +82,27 @@ Only password hashes are stored. A contact number is optional; when supplied for
 
 ## 🚀 Local Quickstart
 
+## Weather endpoint
+
+`GET /api/weather?lat=<latitude>&lon=<longitude>` returns current conditions and the local time zone for any valid global coordinates. The endpoint uses Open-Meteo's current weather feed and requires a signed-in session, like the ride-planning endpoints.
+
 ### 1. Prerequisites
-- Python 3.10+ (tested on Python 3.11).
+- Node.js 20 or newer
+- PostgreSQL
 
-### 2. Install Dependencies
+### 2. Configure and install
 ```bash
-python -m venv .venv
-
-# Windows PowerShell:
-.venv\Scripts\Activate.ps1
-
-# macOS/Linux:
-source .venv/bin/activate
-
-pip install -r requirements.txt
+npm install
+cp .env.example .env
+# Set DATABASE_URL and JWT_SECRET_KEY in .env
 ```
+On Windows PowerShell, use `Copy-Item .env.example .env` in place of `cp`.
 
-### 3. Start Backend API (Terminal 1)
-```powershell
-cd api
-uvicorn app:app --reload --host 127.0.0.1 --port 8000
+### 3. Start the full-stack app
+```bash
+npm start
 ```
-* Interactive Swagger Docs: `http://127.0.0.1:8000/docs`
-* API Root Health: `http://127.0.0.1:8000/`
-
-### 4. Start Frontend Dashboard (Terminal 2)
-```powershell
-cd dashboard
-streamlit run app.py
-```
-* Dashboard opens at `http://localhost:8501` with account creation as the first screen. Use Plan a ride to search pickup and destination worldwide.
-* Set `API_BASE_URL` to the running FastAPI service URL (defaults to localhost).
+Open `http://localhost:3000`. The Node server serves the JavaScript UI and its API from one origin, so signup and login do not depend on a second cold-starting web service.
 
 ---
 
@@ -122,12 +115,10 @@ This repository includes a `render.yaml` Blueprint for 1-click cloud deployment.
 2. Open your [Render Dashboard](https://dashboard.render.com).
 3. Click **New +** $\rightarrow$ **Blueprint**.
 4. Select `Ride_Demand_Project`.
-5. Render will automatically provision both:
-   - `zonepulse-api` (FastAPI backend)
-   - `zonepulse-dashboard` (Streamlit UI)
-6. The Blueprint adopts the existing `Ride_Demand_Project` dashboard service and creates `zonepulse-api` for authentication and predictions. Open the existing dashboard URL to create an account.
+5. The Blueprint includes `zonepulse-api` for legacy Python model endpoints and `Ride_Demand_Project` as the Node.js full-stack app.
+6. The Node service connects to `zonepulse-db`. Open the existing site URL to sign in or create an account; account and trip tables stay in the same database.
 
-The Render Blueprint installs a small dependency set for the dashboard and a model-serving set for the API; Snowflake and EDA packages stay out of the web-service builds. Free Render web services can spin down when idle. The shared public Photon geocoder is suitable only for reasonable interactive search volume. Forecasts outside New York training coverage are planning baselines.
+The app's frontend and backend share one Node.js Render web service and one database connection. Free Render services can spin down when idle, and free PostgreSQL expires after 30 days. The public Photon geocoder is intended for reasonable interactive search volume. Forecasts are global planning baselines, not live local demand.
 
 ---
 
@@ -146,12 +137,20 @@ The Render Blueprint installs a small dependency set for the dashboard and a mod
 
 ```text
 Ride_Demand_Project/
+├── server.js             ← Express backend and static asset server
+├── server/
+│   └── domain.js         ← Global estimate and weather helpers
+├── public/
+│   ├── app.js            ← Responsive JavaScript frontend
+│   ├── styles.css        ← UI design system
+│   └── index.html        ← App shell
+├── package.json          ← Node.js runtime dependencies and scripts
+├── package-lock.json     ← Reproducible Node dependency lock
 ├── api/
-│   ├── app.py             ← FastAPI REST service (Regression, Classification, Batch)
-│   ├── auth.py            ← User authentication & SQLite token manager
-│   └── users.db           ← Auto-generated persistent user database
+│   ├── app.py             ← Legacy FastAPI model endpoints
+│   └── ride_service.py    ← Python model helpers
 ├── dashboard/
-│   └── app.py             ← 4-tab Streamlit dashboard with login/signup gate
+│   └── app.py             ← Previous Streamlit interface
 ├── data/
 │   └── processed/
 │       └── processed.csv  ← 311,156 model-ready aggregated zone-hour records (8.3 MB)

@@ -242,6 +242,44 @@ def geocode_location(q: str = Query(..., min_length=3, max_length=160),
     return results
 
 
+@app.get("/weather")
+def current_weather(lat: float = Query(..., ge=-90, le=90),
+                    lon: float = Query(..., ge=-180, le=180),
+                    user: dict = Depends(require_current_user)):
+    """Return current conditions and local clock time for any global coordinate."""
+    params = urlencode({
+        "latitude": lat,
+        "longitude": lon,
+        "current": "temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m",
+        "timezone": "auto",
+        "temperature_unit": "celsius",
+        "wind_speed_unit": "kmh",
+    })
+    request = Request(
+        f"https://api.open-meteo.com/v1/forecast?{params}",
+        headers={"User-Agent": "ZonePulse/1.0 (mobility planning demo)"},
+    )
+    try:
+        with urlopen(request, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        current = payload["current"]
+        units = payload.get("current_units", {})
+        return {
+            "time": current["time"],
+            "timezone": payload.get("timezone", "Local time"),
+            "temperature": current["temperature_2m"],
+            "feels_like": current["apparent_temperature"],
+            "humidity": current["relative_humidity_2m"],
+            "precipitation": current["precipitation"],
+            "wind_speed": current["wind_speed_10m"],
+            "is_day": bool(current["is_day"]),
+            "weather_code": current["weather_code"],
+            "units": units,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Current weather is temporarily unavailable. Please try again.") from exc
+
+
 @app.post("/ride/quote")
 def quote_ride(req: RideQuoteRequest, user: dict = Depends(require_current_user)):
     """

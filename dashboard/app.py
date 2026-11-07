@@ -2,6 +2,7 @@
 import html
 import os
 import re
+import time
 import requests
 import pandas as pd
 import streamlit as st
@@ -58,6 +59,11 @@ def api_call(path, method="GET", payload=None, token=None, timeout=45):
     except ValueError:
         body = {"detail": response.text or "The service returned an unreadable response."}
     if not response.ok:
+        if response.status_code == 401 and token and token == st.session_state.get("zp_token"):
+            for key in list(st.session_state.keys()):
+                if key.startswith("zp_") or key.startswith("ride_"):
+                    del st.session_state[key]
+            st.rerun()
         detail = body.get("detail", "Request failed.")
         if isinstance(detail, list):
             detail = "; ".join(item.get("msg", "Invalid input") for item in detail)
@@ -127,7 +133,7 @@ def show_auth():
                         st.error(str(exc))
         with sign_in_tab:
             with st.form("login_form"):
-                identifier = st.text_input("Username or email", placeholder="you@example.com")
+                identifier = st.text_input("Email or account username", placeholder="you@example.com")
                 login_password = st.text_input("Password", type="password")
                 submitted = st.form_submit_button("Sign in", type="primary", use_container_width=True)
             if submitted:
@@ -143,6 +149,8 @@ def show_auth():
                     st.error("The sign-in service is unavailable right now. Please retry.")
                 except RuntimeError as exc:
                     st.error(str(exc))
+                    if str(exc) == "Invalid username or password":
+                        st.caption("Use the same email or username and password you used when the account was created. If your account was created before the service's database was changed, it may no longer be in the active account store.")
         st.caption("Passwords are stored as salted hashes. They are never saved in the dashboard session.")
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -241,6 +249,50 @@ def _global_place_search(query):
     return api_call(f"/geocode?q={quote(query.strip())}", token=token, timeout=15)
 
 
+def _weather_description(code):
+    if code == 0:
+        return "Clear sky"
+    if code in (1, 2, 3):
+        return "Mainly clear" if code == 1 else ("Partly cloudy" if code == 2 else "Overcast")
+    if code in (45, 48):
+        return "Fog"
+    if code in (51, 53, 55, 56, 57):
+        return "Drizzle"
+    if code in (61, 63, 65, 66, 67, 80, 81, 82):
+        return "Rain"
+    if code in (71, 73, 75, 77, 85, 86):
+        return "Snow"
+    if code in (95, 96, 99):
+        return "Thunderstorm"
+    return "Current conditions"
+
+
+def render_pickup_weather(place):
+    """Show conditions and the latest local observation time for the selected pickup."""
+    coords = (round(place["lat"], 3), round(place["lon"], 3))
+    cached = st.session_state.get("pickup_weather")
+    refresh_clicked = st.button("Refresh weather", key="refresh_pickup_weather")
+    expired = cached and time.time() - cached.get("fetched_at", 0) >= 600
+    if not cached or cached.get("coords") != coords or expired or refresh_clicked:
+        try:
+            with st.spinner("Loading current pickup weather…"):
+                cached = api_call(f"/weather?lat={place['lat']}&lon={place['lon']}", token=token, timeout=15)
+            cached["coords"] = coords
+            cached["fetched_at"] = time.time()
+            st.session_state["pickup_weather"] = cached
+        except (requests.RequestException, RuntimeError) as exc:
+            st.info(f"Pickup weather is temporarily unavailable: {exc}")
+            return
+    st.markdown('<div class="zp-section"><h3>Pickup weather</h3></div>', unsafe_allow_html=True)
+    a, b, c, d = st.columns(4)
+    units = cached.get("units", {})
+    a.metric(_weather_description(cached.get("weather_code")), f"{cached['temperature']:g}{units.get('temperature_2m', '°C')}")
+    b.metric("Feels like", f"{cached['feels_like']:g}{units.get('apparent_temperature', '°C')}")
+    c.metric("Humidity", f"{cached['humidity']:g}{units.get('relative_humidity_2m', '%')}")
+    d.metric("Wind", f"{cached['wind_speed']:g} {units.get('wind_speed_10m', 'km/h')}")
+    st.caption(f"{place['label']} · Local time {cached['time']} ({cached['timezone']}) · Updated from current conditions · Open-Meteo")
+
+
 def render_ride_planner():
     page_header("Plan a ride", "Search an address anywhere in the world, review the route points, and save your estimate.")
     st.markdown(
@@ -282,6 +334,8 @@ def render_ride_planner():
     destinations = st.session_state.get("global_destinations", [])
     if not origins or not destinations:
         return
+    selected_origin = origins[st.session_state.get("world_pickup_result", 0)]
+    render_pickup_weather(selected_origin)
     st.markdown('<div class="zp-section"><h3>Choose the matching places</h3></div>', unsafe_allow_html=True)
     with st.form("quote_form"):
         col_a, col_b = st.columns(2)
