@@ -1,4 +1,5 @@
 """ZonePulse web experience: signup first, then mobility operations."""
+import html
 import os
 import requests
 import streamlit as st
@@ -105,6 +106,7 @@ if not st.session_state.get("zp_token"):
 
 token = st.session_state["zp_token"]
 username = st.session_state.get("zp_username", "Rider")
+display_name = html.escape(username)
 
 with st.sidebar:
     st.markdown("## ZonePulse")
@@ -120,7 +122,7 @@ with st.sidebar:
         st.rerun()
     st.caption("Estimates are simulated for demonstration.")
 
-st.markdown(f'<div class="zp-hero"><div class="zp-eyebrow">ZonePulse / {page}</div><h1>{page if page != "Overview" else "Good to have you here, " + username + "."}</h1><p>Ride planning and demand signals for New York City.</p></div>', unsafe_allow_html=True)
+st.markdown(f'<div class="zp-hero"><div class="zp-eyebrow">ZonePulse / {page}</div><h1>{page if page != "Overview" else "Good to have you here, " + display_name + "."}</h1><p>Ride planning and demand signals for New York City.</p></div>', unsafe_allow_html=True)
 
 def render_overview():
     try:
