@@ -1,5 +1,3 @@
- 1 file changed, 39 insertions(+), 12 deletions(-)
-35d0d72befd4f2224b0b0d244db61b964b199726
 import "dotenv/config";
 import express from "express";
 import helmet from "helmet";
