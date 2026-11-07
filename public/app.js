@@ -137,24 +137,46 @@ function renderPlanner() {
   timeInput.value = new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0,16);
   for (const kind of ["pickup", "dropoff"]) {
     const input = document.querySelector(`#${kind}-search`);
-    input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); searchPlaces(kind); } });
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      if (state.places[kind].length) selectPlace(kind, 0);
+      else searchPlaces(kind);
+    });
     document.querySelector(`[data-search="${kind}"]`).addEventListener("click", () => searchPlaces(kind));
-    input.addEventListener("input", () => { state.places[kind] = []; state.quote = null; document.querySelector("#quote-result").innerHTML = ""; if (kind === "pickup") { state.weather = null; renderWeather(); } updateRouteLabel(); });
+    input.addEventListener("input", () => {
+      state.places[kind] = []; state.quote = null;
+      document.querySelector("#quote-result").innerHTML = "";
+      if (kind === "pickup") { state.weather = null; renderWeather(); }
+      updateRouteLabel();
+      clearTimeout(state.searchTimers?.[kind]);
+      const query = input.value.trim(); const results = document.querySelector(`#${kind}-results`);
+      if (query.length < 3) { results.innerHTML = query ? '<div class="suggestion-empty">Type at least three characters to search worldwide.</div>' : ""; return; }
+      results.innerHTML = '<div class="suggestion-empty">Searching worldwide places…</div>';
+      state.searchTimers ||= {}; state.searchTimers[kind] = setTimeout(() => searchPlaces(kind), 350);
+    });
   }
   document.querySelector("#get-estimate").addEventListener("click", getEstimate);
   updateRouteLabel();
 }
 
 async function searchPlaces(kind) {
+  clearTimeout(state.searchTimers?.[kind]);
   const query = document.querySelector(`#${kind}-search`).value.trim(); const results = document.querySelector(`#${kind}-results`);
   if (query.length < 3) { results.innerHTML = '<div class="suggestion-empty">Enter at least three characters.</div>'; return; }
+  state.searchSequence ||= {};
+  const requestSequence = state.searchSequence[kind] = (state.searchSequence[kind] || 0) + 1;
   results.innerHTML = '<div class="suggestion-empty">Searching worldwide places…</div>';
   try {
     const data = await api(`/api/geocode?q=${encodeURIComponent(query)}`);
+    if (requestSequence !== state.searchSequence[kind] || document.querySelector(`#${kind}-search`).value.trim() !== query) return;
     state.places[kind] = data;
-    results.innerHTML = data.length ? data.map((item, index) => `<button class="suggestion" data-place="${kind}" data-index="${index}"><span>${icon("pin",17)}</span><strong>${esc(item.label)}</strong>${icon("arrow",15)}</button>`).join("") : '<div class="suggestion-empty">No match found. Try adding the city or country.</div>';
+    results.innerHTML = data.length ? `<div class="suggestion-heading">${data.length} matching places · choose one</div>${data.map((item, index) => `<button class="suggestion" type="button" data-place="${kind}" data-index="${index}"><span>${icon("pin",17)}</span><strong>${esc(item.label)}</strong>${icon("arrow",15)}</button>`).join("")}` : '<div class="suggestion-empty">No match found. Add a city or country name and try again.</div>';
     results.querySelectorAll("[data-place]").forEach((button) => button.addEventListener("click", () => selectPlace(kind, Number(button.dataset.index))));
-  } catch (error) { results.innerHTML = `<div class="suggestion-empty error-text">${esc(error.message)}</div>`; }
+  } catch (error) {
+    if (requestSequence !== state.searchSequence[kind]) return;
+    results.innerHTML = `<div class="suggestion-empty error-text">${esc(error.message)}</div>`;
+  }
 }
 
 async function selectPlace(kind, index) {
