@@ -4,7 +4,8 @@ import os
 import requests
 import streamlit as st
 
-API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+_api_address = os.getenv("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+API_BASE_URL = _api_address if "://" in _api_address else f"http://{_api_address}"
 st.set_page_config(page_title="ZonePulse | NYC Mobility", page_icon="Z", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
