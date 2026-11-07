@@ -103,8 +103,8 @@ def calculate_haversine_distance(lat1: float, lon1: float, lat2: float, lon2: fl
 
 
 def estimate_travel_time_minutes(distance_km: float, hour: int) -> int:
-    """Estimate travel time in minutes based on NYC traffic conditions."""
-    # Peak traffic hours in NYC (8-10 AM and 5-8 PM)
+    """Rough, city-agnostic travel-time estimate; not live traffic routing."""
+    # Generic urban peak periods used only for a rough duration estimate
     if (8 <= hour <= 10) or (17 <= hour <= 20):
         speed_kmh = 20.0  # Heavy traffic
     elif 23 <= hour or hour <= 5:
@@ -140,25 +140,35 @@ def compute_ride_quote(
     distance_miles = round(distance_km * 0.621371, 2)
     duration_mins = estimate_travel_time_minutes(distance_km, hour)
 
-    location_code = engine.find_nearest_location_code(pickup_lat, pickup_lon)
     is_weekend = 1 if day_of_week in [5, 6] else 0
     hour_bin = hour // 3
-    cluster = int(engine.kmeans.predict([[location_code, hour]])[0])
-
-    feature_vector = np.array([[
-        location_code, hour, day_of_week, month, is_weekend, hour_bin, cluster
-    ]])
-
-    # 1. XGBoost Regression (Exact Demand Count in this Zone)
-    raw_demand = float(engine.model.predict(feature_vector)[0])
-    predicted_demand = round(max(1.0, raw_demand), 1)
-
-    # 2. XGBoost Classification (Surge Tier)
-    pred_class = int(engine.classifier.predict(feature_vector)[0])
+    # The stored model was trained on NYC zones only; do not present NYC
+    # nearest-zone extrapolation as a locally trained forecast elsewhere.
+    in_nyc_training_area = 40.4 <= pickup_lat <= 41.2 and -74.4 <= pickup_lon <= -73.6
     class_labels = ["Low", "Medium", "High", "Very High"]
+    if in_nyc_training_area:
+        location_code = engine.find_nearest_location_code(pickup_lat, pickup_lon)
+        cluster = int(engine.kmeans.predict([[location_code, hour]])[0])
+        feature_vector = np.array([[location_code, hour, day_of_week, month, is_weekend, hour_bin, cluster]])
+        raw_demand = float(engine.model.predict(feature_vector)[0])
+        predicted_demand = round(max(1.0, raw_demand), 1)
+        pred_class = int(engine.classifier.predict(feature_vector)[0])
+        probs = engine.classifier.predict_proba(feature_vector)[0]
+        prediction_source = "NYC-trained ML model"
+        prediction_note = "This route is within the model's New York training coverage."
+    else:
+        # Transparent global planning prior: time-of-week framework, not ML.
+        location_code = None
+        cluster = 0
+        rush_hour_factor = 1.45 if hour in (7, 8, 9, 16, 17, 18, 19) else 1.0
+        weekend_factor = 1.15 if is_weekend else 1.0
+        predicted_demand = round(8.0 * rush_hour_factor * weekend_factor, 1)
+        pred_class = 0 if predicted_demand < 5 else 1 if predicted_demand < 10 else 2 if predicted_demand < 20 else 3
+        probs = [0.08, 0.72, 0.15, 0.05]
+        probs[pred_class] = 0.72
+        prediction_source = "Global planning baseline"
+        prediction_note = "Outside New York training coverage. This directional baseline is not a locally trained or live-demand forecast."
     tier_label = class_labels[pred_class]
-
-    probs = engine.classifier.predict_proba(feature_vector)[0]
     tier_probabilities = {class_labels[i]: round(float(probs[i]) * 100, 1) for i in range(len(class_labels))}
 
     # 3. Probability of Finding a Car in that Area & Distance:
@@ -204,11 +214,11 @@ def compute_ride_quote(
     random.seed(int(pickup_lat * 1000 + pickup_lon * 1000 + hour))
     driver_first_names = ["Michael", "David", "Ahmed", "Carlos", "Alex", "James", "Elena", "Marcus", "Dmitri", "Sarah"]
     driver_cars = [
-        ("Toyota Camry Hybrid", "Black", "TLC #7K82"),
-        ("Honda Accord", "Silver", "TLC #4M19"),
-        ("Hyundai Sonata", "White", "TLC #9B44"),
-        ("Toyota RAV4", "Gray", "TLC #3X71"),
-        ("Tesla Model Y", "Blue", "TLC #8Z50"),
+        ("Toyota Camry Hybrid", "Black", "DEMO-7K82"),
+        ("Honda Accord", "Silver", "DEMO-4M19"),
+        ("Hyundai Sonata", "White", "DEMO-9B44"),
+        ("Toyota RAV4", "Gray", "DEMO-3X71"),
+        ("Tesla Model Y", "Blue", "DEMO-8Z50"),
     ]
 
     nearby_drivers = []
@@ -220,7 +230,7 @@ def compute_ride_quote(
         d_eta = max(1, int((d_dist / 22.0) * 60) + 1)
         car_info = driver_cars[i % len(driver_cars)]
         nearby_drivers.append({
-            "driver_id": f"DRV-{1000 + i}",
+            "driver_id": f"DEMO-{(int(round(pickup_lat * 10000)) * 1000003 + int(round(pickup_lon * 10000)) * 1009 + i) % 100000000:08d}",
             "name": f"{driver_first_names[i]} {chr(65 + i)}.",
             "rating": round(random.uniform(4.88, 4.99), 2),
             "car_model": car_info[0],
@@ -240,6 +250,9 @@ def compute_ride_quote(
         "distance_miles": distance_miles,
         "duration_minutes": duration_mins,
         "pickup_location_code": location_code,
+        "prediction_source": prediction_source,
+        "prediction_note": prediction_note,
+        "fare_currency": "USD equivalent",
         "predicted_hourly_demand": predicted_demand,
         "demand_tier": tier_label,
         "surge_multiplier": surge_mult,
