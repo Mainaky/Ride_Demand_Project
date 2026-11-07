@@ -11,8 +11,7 @@ Docs           : /docs           → auto-generated Swagger UI
 """
 
 import os, json
-import numpy as np
-import joblib
+from functools import lru_cache
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -23,31 +22,37 @@ try:
         init_db, register_user, authenticate_user,
         SignUpRequest, LoginRequest, AuthResponse, decode_token
     )
-    from api.ride_service import (
-        compute_ride_quote, save_booking, get_bookings,
-        NYC_LANDMARKS, init_booking_db
-    )
 except ImportError:
     from auth import (
         init_db, register_user, authenticate_user,
         SignUpRequest, LoginRequest, AuthResponse, decode_token
-    )
-    from ride_service import (
-        compute_ride_quote, save_booking, get_bookings,
-        NYC_LANDMARKS, init_booking_db
     )
 
 BASE_DIR  = os.path.dirname(__file__)
 MODEL_DIR = os.path.join(BASE_DIR, "..", "model")
 
 def _load(name):
+    import joblib
+
     p = os.path.join(MODEL_DIR, name)
     if not os.path.exists(p):
         raise RuntimeError(f"{name} not found at {p}. Run python model/train.py first.")
     return joblib.load(p)
 
-model      = _load("model.pkl")
-classifier = _load("classifier.pkl")
+
+@lru_cache(maxsize=1)
+def _get_models():
+    """Load expensive estimators only when a forecast is requested."""
+    return _load("model.pkl"), _load("classifier.pkl")
+
+
+def _get_ride_service():
+    """Import pandas and NumPy dependent ride helpers only when needed."""
+    try:
+        from api import ride_service
+    except ImportError:
+        import ride_service
+    return ride_service
 
 metrics_path = os.path.join(MODEL_DIR, "metrics.json")
 metrics = json.load(open(metrics_path)) if os.path.exists(metrics_path) else {}
@@ -75,8 +80,8 @@ app = FastAPI(
 
 @app.on_event("startup")
 def startup_init():
+    # Auth is the only database needed before the first request.
     init_db()
-    init_booking_db()
 
 
 def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(SECURITY)) -> Optional[dict]:
@@ -141,6 +146,8 @@ class BatchRequest(BaseModel):
 
 
 def _features(req: PredictRequest):
+    import numpy as np
+
     return np.array([[
         req.location_code, req.hour, req.day_of_week,
         req.month, req.is_weekend, req.hour_bin, req.cluster
@@ -185,9 +192,10 @@ def root():
 @app.get("/landmarks")
 def list_landmarks():
     """Return pre-mapped NYC landmarks with exact latitude and longitude."""
+    landmarks = _get_ride_service().NYC_LANDMARKS
     return [
         {"name": name, "lat": coords[0], "lon": coords[1]}
-        for name, coords in NYC_LANDMARKS.items()
+        for name, coords in landmarks.items()
     ]
 
 
@@ -197,7 +205,7 @@ def quote_ride(req: RideQuoteRequest, user: dict = Depends(require_current_user)
     Calculates probability of finding a car in the requested area and distance,
     estimated wait time, ML predicted demand, surge tier, fare options, and nearby drivers.
     """
-    quote = compute_ride_quote(
+    quote = _get_ride_service().compute_ride_quote(
         pickup_lat=req.pickup_lat,
         pickup_lon=req.pickup_lon,
         dropoff_lat=req.dropoff_lat,
@@ -216,7 +224,7 @@ def book_ride(req: RideBookingRequest, user: dict = Depends(require_current_user
     """Confirm and persist a ride booking for the signed-in account."""
     booking_data = req.model_dump()
     booking_data["passenger_name"] = user["sub"]
-    booking_record = save_booking(booking_data)
+    booking_record = _get_ride_service().save_booking(booking_data)
     return {
         "status": "Booking Confirmed",
         "message": f"Your ride has been confirmed! Driver {req.driver_name} is arriving in {req.eta_mins} minutes.",
@@ -227,7 +235,7 @@ def book_ride(req: RideBookingRequest, user: dict = Depends(require_current_user
 @app.get("/ride/history")
 def ride_history(user: dict = Depends(require_current_user)):
     """Retrieve only the signed-in user's historical bookings."""
-    return get_bookings(user["sub"])
+    return _get_ride_service().get_bookings(user["sub"])
 
 
 # ── Auth Endpoints ────────────────────────────────────────────────────────────
@@ -268,6 +276,7 @@ def predict(location_code: int, hour: int, day_of_week: int = 0,
         day_of_week=day_of_week, month=month,
         is_weekend=is_weekend, hour_bin=hour_bin, cluster=cluster
     )
+    model, _ = _get_models()
     demand = round(float(model.predict(_features(req))[0]), 1)
     return {
         "type":               "regression",
@@ -290,6 +299,7 @@ def classify(location_code: int, hour: int, day_of_week: int = 0,
         is_weekend=is_weekend, hour_bin=hour_bin, cluster=cluster
     )
     X = _features(req)
+    _, classifier = _get_models()
     pred_class = int(classifier.predict(X)[0])
     label = CLASS_LABELS[pred_class]
 
@@ -314,6 +324,7 @@ def predict_batch(body: BatchRequest, user: dict = Depends(require_current_user)
     """Batch regression + classification for multiple inputs."""
     if len(body.inputs) > 1000:
         raise HTTPException(400, "Max 1000 inputs per batch")
+    model, classifier = _get_models()
     results = []
     for req in body.inputs:
         X = _features(req)
@@ -335,8 +346,7 @@ def get_stats(user: dict = Depends(require_current_user)):
 
 @app.get("/model-info")
 def model_info(user: dict = Depends(require_current_user)):
-    pca_model = joblib.load(os.path.join(MODEL_DIR, "pca.pkl")) \
-        if os.path.exists(os.path.join(MODEL_DIR, "pca.pkl")) else None
+    pca_model = _load("pca.pkl") if os.path.exists(os.path.join(MODEL_DIR, "pca.pkl")) else None
     pca_variance = {}
     if pca_model:
         ev = pca_model.explained_variance_ratio_
