@@ -1,3 +1,5 @@
+ 1 file changed, 39 insertions(+), 12 deletions(-)
+35d0d72befd4f2224b0b0d244db61b964b199726
 import "dotenv/config";
 import express from "express";
 import helmet from "helmet";
@@ -250,18 +252,45 @@ app.get("/api/overview", authenticate, async (req, res, next) => {
 app.get("/api/geocode", authenticate, async (req, res, next) => {
   try {
     const query = requireText(req.query.q, "Place search", 3, 160);
-    const url = new URL("https://photon.komoot.io/api/");
-    url.search = new URLSearchParams({ q: query, limit: "5", lang: "en" });
-    const response = await fetch(url, { signal: AbortSignal.timeout(10_000), headers: { "User-Agent": "ZonePulse/2.0 (mobility planning)" } });
-    if (!response.ok) return res.status(502).json({ error: "Worldwide place search is temporarily unavailable. Please try again." });
-    const body = await response.json();
-    res.json((body.features || []).flatMap((feature) => {
-      const [lon, lat] = feature.geometry?.coordinates || [];
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return [];
-      const p = feature.properties || {};
-      const label = [p.name, p.street, p.city || p.county, p.state, p.country].filter(Boolean).filter((value, i, all) => all.indexOf(value) === i).join(", ");
-      return [{ label: label || query, lat, lon, country_code: p.countrycode || "" }];
-    }));
+    const openMeteoUrl = new URL("https://geocoding-api.open-meteo.com/v1/search");
+    openMeteoUrl.search = new URLSearchParams({ name: query, count: "5", language: "en", format: "json" });
+    try {
+      const response = await fetch(openMeteoUrl, { signal: AbortSignal.timeout(8_000) });
+      if (!response.ok) throw new Error(`Open-Meteo returned HTTP ${response.status}`);
+      const body = await response.json();
+      const places = (body.results || []).map((place) => {
+        const label = [place.name, place.admin1, place.admin2, place.country]
+          .filter(Boolean).filter((value, index, all) => all.indexOf(value) === index).join(", ");
+        return { label, lat: Number(place.latitude), lon: Number(place.longitude), country_code: place.country_code || "" };
+      }).filter((place) => Number.isFinite(place.lat) && Number.isFinite(place.lon));
+      if (places.length) return res.json(places);
+    } catch (error) {
+      console.warn(`Open-Meteo geocoding failed (${error.cause?.code || error.name || "upstream error"}).`);
+    }
+
+    // Keep detailed address/landmark search available when the city geocoder has no match.
+    try {
+      const photonUrl = new URL("https://photon.komoot.io/api/");
+      photonUrl.search = new URLSearchParams({ q: query, limit: "5", lang: "en" });
+      const response = await fetch(photonUrl, {
+        signal: AbortSignal.timeout(8_000),
+        headers: { "User-Agent": "ZonePulse/2.0 (mobility planning)" },
+      });
+      if (!response.ok) throw new Error(`Photon returned HTTP ${response.status}`);
+      const body = await response.json();
+      const places = (body.features || []).flatMap((feature) => {
+        const [lon, lat] = feature.geometry?.coordinates || [];
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return [];
+        const p = feature.properties || {};
+        const label = [p.name, p.street, p.city || p.county, p.state, p.country]
+          .filter(Boolean).filter((value, index, all) => all.indexOf(value) === index).join(", ");
+        return [{ label: label || query, lat: Number(lat), lon: Number(lon), country_code: p.countrycode || "" }];
+      });
+      return res.json(places);
+    } catch (error) {
+      console.error(`Location search providers failed (${error.cause?.code || error.name || "upstream error"}).`);
+      return res.status(503).json({ error: "The global place-search services could not be reached. Please retry shortly." });
+    }
   } catch (error) {
     if (error.name === "TimeoutError" || error.name === "AbortError") return res.status(503).json({ error: "Location search took too long. Try again in a moment." });
     next(error);
@@ -392,3 +421,4 @@ initializeDatabase().then(() => {
   console.error("ZonePulse could not connect to its configured database:", error.message);
   process.exit(1);
 });
+
