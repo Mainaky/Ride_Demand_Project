@@ -67,6 +67,7 @@ def api_call(path, method="GET", payload=None, token=None, timeout=45):
 def establish_session(result):
     st.session_state["zp_token"] = result["access_token"]
     st.session_state["zp_username"] = result["username"]
+    st.session_state["zp_display_name"] = result.get("full_name") or result["username"]
     st.session_state["zp_email"] = result["email"]
     st.rerun()
 
@@ -151,7 +152,8 @@ if not st.session_state.get("zp_token"):
 
 token = st.session_state["zp_token"]
 username = st.session_state.get("zp_username", "Rider")
-safe_username = html.escape(username)
+display_name = st.session_state.get("zp_display_name", username)
+safe_username = html.escape(display_name)
 
 with st.sidebar:
     st.markdown("## ZonePulse")
@@ -340,6 +342,10 @@ def render_ride_planner():
             "driver_lon": selected_driver.get("lon"),
             "driver_distance_km": selected_driver.get("distance_km"),
             "eta_mins": selected_driver.get("eta_minutes", quote["estimated_wait_time_minutes"]),
+            "predicted_hourly_demand": quote.get("predicted_hourly_demand"),
+            "demand_tier": quote.get("demand_tier"),
+            "surge_multiplier": quote.get("surge_multiplier"),
+            "probability_finding_car_pct": quote.get("probability_finding_car_pct"),
         }
         try:
             result = api_call("/ride/book", "POST", booking, token=token, timeout=60)
@@ -428,10 +434,6 @@ def render_demand_insights():
             "hour_bin": hour // 3,
             "cluster": 0,
         }
-        try:
-            prediction = api_call("/predict", token=token)
-        except Exception:
-            prediction = None
         try:
             response = requests.get(
                 f"{API_BASE_URL}/predict",
