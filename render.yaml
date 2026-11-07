@@ -29,4 +29,7 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.10
       - key: API_BASE_URL
-        value: https://zonepulse-api.onrender.com
+        fromService:
+          type: web
+          name: zonepulse-api
+          property: hostport
