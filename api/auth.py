@@ -91,15 +91,17 @@ class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     username: str
+    full_name: str
     email: str
     role: str
     message: str
 
 
-def _response(username: str, email: str, role: str, message: str) -> AuthResponse:
+def _response(username: str, full_name: str, email: str, role: str, message: str) -> AuthResponse:
     return AuthResponse(
         access_token=create_token(username, role),
         username=username,
+        full_name=full_name,
         email=email,
         role=role,
         message=message,
@@ -107,7 +109,8 @@ def _response(username: str, email: str, role: str, message: str) -> AuthRespons
 
 
 def register_user(req: SignUpRequest) -> AuthResponse:
-    username = req.username.strip().lower()
+    full_name = req.username.strip()
+    username = full_name.lower()
     email = req.email.strip().lower()
     role = "Mobility Operations Analyst"
 
@@ -119,7 +122,7 @@ def register_user(req: SignUpRequest) -> AuthResponse:
     # A retry after a dropped signup response safely resumes only the exact same account.
     if existing:
         if existing["username"] == username and existing["email"] == email and verify_password(req.password, existing["password_hash"]):
-            return _response(existing["username"], existing["email"], existing["role"], "Account ready")
+            return _response(existing["username"], existing["full_name"], existing["email"], existing["role"], "Account ready")
         raise ValueError("Username or email is already registered")
 
     password_hash = hash_password(req.password)
@@ -127,6 +130,7 @@ def register_user(req: SignUpRequest) -> AuthResponse:
         with engine.begin() as conn:
             conn.execute(insert(passengers).values(
                 username=username,
+                full_name=full_name,
                 email=email,
                 password_hash=password_hash,
                 role=role,
@@ -134,7 +138,7 @@ def register_user(req: SignUpRequest) -> AuthResponse:
     except IntegrityError:
         raise ValueError("Username or email is already registered")
 
-    return _response(username, email, role, "Account created successfully")
+    return _response(username, full_name, email, role, "Account created successfully")
 
 
 def authenticate_user(req: LoginRequest) -> AuthResponse:
@@ -148,4 +152,4 @@ def authenticate_user(req: LoginRequest) -> AuthResponse:
 
     if not row or not verify_password(req.password, row["password_hash"]):
         raise ValueError("Invalid username or password")
-    return _response(row["username"], row["email"], row["role"], "Authentication successful")
+    return _response(row["username"], row["full_name"], row["email"], row["role"], "Authentication successful")
