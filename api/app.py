@@ -133,6 +133,10 @@ class RideBookingRequest(BaseModel):
     driver_lon: Optional[float] = None
     driver_distance_km: Optional[float] = None
     eta_mins: Optional[int] = 3
+    predicted_hourly_demand: Optional[float] = None
+    demand_tier: Optional[str] = None
+    surge_multiplier: Optional[float] = None
+    probability_finding_car_pct: Optional[float] = None
 
 
 # ── Operational ML Schemas ────────────────────────────────────────────────────
@@ -282,6 +286,7 @@ def me(user: Optional[dict] = Depends(get_current_user)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Passenger account not found")
     return {
         "username": passenger["username"],
+        "full_name": passenger["full_name"],
         "email": passenger["email"],
         "phone": passenger.get("phone"),
         "role": passenger["role"],
