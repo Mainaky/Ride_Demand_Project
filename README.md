@@ -28,9 +28,9 @@
                              │                            │
                              ▼                            ▼
                ┌──────────────────────────┐  ┌──────────────────────────┐
-               │    SQLITE AUTH STORE     │  │   SNOWFLAKE CLOUD DWH    │
-               │   api/users.db (PBKDF2)  │  │   UBER_PROJECT.RIDE_DATA │
-               │   Salted Passwords & JWT │  │   write_pandas Ingestion │
+               │   RENDER POSTGRESQL     │  │   SNOWFLAKE CLOUD DWH    │
+               │ Passengers · Drivers    │  │   UBER_PROJECT.RIDE_DATA │
+               │ Rides · PBKDF2 hashes   │  │   write_pandas Ingestion │
                └──────────────────────────┘  └──────────────────────────┘
 ```
 
@@ -38,20 +38,38 @@
 
 ## 🌟 Key Features
 
-1. **Enterprise User Authentication:**
-   - **User Sign-Up:** Secure registration with email validation and PBKDF2-HMAC-SHA256 salted password hashing.
-   - **User Login:** Issues tamper-evident signed JWT bearer tokens with 7-day expiration.
-   - **Account-first dashboard:** Sign-up is the first screen; trip history is scoped to the signed-in account.
-2. **Dual Machine Learning Engine:**
+1. **Passenger accounts and authentication:**
+   - Passenger names, email addresses, optional contact numbers, salted PBKDF2-HMAC-SHA256 password hashes, and account timestamps are stored in PostgreSQL.
+   - Login issues signed bearer tokens with a 7-day expiration.
+   - Retried account creation safely resumes the same account after a delayed response.
+2. **PostgreSQL ride records:**
+   - Passenger profiles, driver and vehicle profiles, trip routes and coordinates, fare and demand estimates, timestamps, and booking status are stored in related tables.
+   - Each passenger can view only their own trip history.
+   - Driver availability is simulated for this portfolio application and is not a live dispatch network.
+3. **Dual Machine Learning Engine:**
    - **Regression Track (XGBoost):** Explains **79.3% of demand variance** ($R^2 = 0.7930$, $\text{MAE} = 7.97$ rides) to forecast exact ride counts for driver capacity sizing.
    - **Classification Track (XGBoost):** Categorizes demand into 4 operational tiers (**Low**, **Medium**, **High**, **Very High**) with **67.8% accuracy** to trigger automated surge multipliers.
-3. **Unsupervised Intelligence:**
+4. **Unsupervised Intelligence:**
    - **PCA (Principal Component Analysis):** Projects 5-dimensional feature space onto 2 principal components for interactive 2D cluster inspection.
    - **K-Means Clustering ($k=4$):** Segments zones into behavioral groups and feeds cluster labels back into XGBoost as augmented features.
-4. **Snowflake Cloud Data Warehouse:**
+5. **Snowflake Cloud Data Warehouse:**
    - Staged bulk loading using `write_pandas` and analytical SQL queries identifying evening peak commute windows (17:00–21:00) and spatial corridors.
-5. **Production Deployment Ready:**
+6. **Production Deployment Ready:**
    - Multi-service `render.yaml` Blueprint for 1-click cloud deployment on Render.
+
+---
+
+## Passenger, driver, and ride storage
+
+Render's Blueprint provisions PostgreSQL and connects it to the API through the internal database URL. The schema contains:
+
+- `passengers`: display name, sign-in username, email, optional phone, password hash, role, and creation time.
+- `drivers`: simulated driver reference, rating, vehicle, color, plate, latest location estimate, ETA, and status.
+- `rides`: passenger and driver references plus route coordinates, fare, ride tier, demand and availability estimates, booking status, and timestamp.
+
+Only password hashes are stored. A contact number is optional; when supplied for a booking, it is saved to the passenger profile and on that trip.
+
+**Current Render selection:** Free PostgreSQL is temporary. Render expires it 30 days after creation; after a further 14-day recovery window, its data is deleted. Upgrade the database before expiry or export the records you need to keep.
 
 ---
 
