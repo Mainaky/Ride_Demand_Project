@@ -1,8 +1,8 @@
 """
-Ride Intelligence & Booking Service — ZonePulse
+Global Ride Planning & Booking Service — ZonePulse
 ================================================
 Handles:
-  1. Popular NYC Landmarks & Geocoding
+  1. Worldwide geocoding plus optional NYC landmarks
   2. Haversine Distance & Duration calculation
   3. Spatial Grid & ML Model Inference (XGBoost Demand & Surge Tier)
   4. Probability of Finding a Car in this area and distance
@@ -164,38 +164,37 @@ def compute_ride_quote(
         weekend_factor = 1.15 if is_weekend else 1.0
         predicted_demand = round(8.0 * rush_hour_factor * weekend_factor, 1)
         pred_class = 0 if predicted_demand < 5 else 1 if predicted_demand < 10 else 2 if predicted_demand < 20 else 3
-        probs = [0.08, 0.72, 0.15, 0.05]
-        probs[pred_class] = 0.72
+        probs = [0.7 if idx == pred_class else 0.1 for idx in range(4)]
         prediction_source = "Global planning baseline"
         prediction_note = "Outside New York training coverage. This directional baseline is not a locally trained or live-demand forecast."
     tier_label = class_labels[pred_class]
     tier_probabilities = {class_labels[i]: round(float(probs[i]) * 100, 1) for i in range(len(class_labels))}
 
     # 3. Probability of Finding a Car in that Area & Distance:
-    # Based on real-world driver density vs passenger demand ratio:
+    # Illustrative availability heuristic for this simulated demo fleet:
     if pred_class == 0:  # Low demand zone
         base_prob = 0.76  # Fewer drivers cruising residential/remote areas
         wait_time_min, wait_time_max = 6, 11
         surge_mult = 1.0
-        status_text = "Moderate Availability — Drivers are cruising nearby"
+        status_text = "Moderate estimated availability — simulated"
         status_color = "amber"
     elif pred_class == 1:  # Medium demand
         base_prob = 0.94  # Optimal driver supply matching demand
         wait_time_min, wait_time_max = 2, 4
         surge_mult = 1.1
-        status_text = "High Availability — Fast Match Guaranteed"
+        status_text = "High estimated availability — simulated"
         status_color = "green"
     elif pred_class == 2:  # High demand
         base_prob = 0.89  # Active zone, drivers present but high pickup requests
         wait_time_min, wait_time_max = 3, 6
         surge_mult = 1.35
-        status_text = "Elevated Demand — High Driver Density"
+        status_text = "Elevated demand — simulated availability"
         status_color = "blue"
     else:  # Very High demand (Surge Zone)
         base_prob = 0.68  # Temporary shortage of idle drivers due to sudden surge
         wait_time_min, wait_time_max = 7, 12
         surge_mult = 1.75
-        status_text = "Surge Demand — High Congestion & High Wait Times"
+        status_text = "High demand — simulated availability and wait"
         status_color = "red"
 
     # Trip distance factor adjustment (drivers accept typical 2-15km trips with highest priority)

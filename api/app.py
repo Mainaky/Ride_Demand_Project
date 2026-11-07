@@ -11,15 +11,13 @@ Docs           : /docs           → auto-generated Swagger UI
 """
 
 import os, json
-import json as _json
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from functools import lru_cache
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
-from fastapi import Query
 
 try:
     from api.auth import (
@@ -76,7 +74,7 @@ SECURITY = HTTPBearer(auto_error=False)
 
 app = FastAPI(
     title="ZonePulse Ride Demand & Booking API",
-    description="Enterprise REST service for ride availability calculation, dynamic surge pricing, ML demand forecasting, and real-time ride booking.",
+    description="Portfolio API for global ride planning estimates, NYC-trained demand forecasting, and passenger trip records.",
     version="2.7.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -180,7 +178,7 @@ def root():
     return {
         "status": "ok",
         "service": "ZonePulse Ride Demand & Booking API",
-        "version": "2.6.0",
+        "version": "2.7.0",
         "endpoints": {
             "health":         "GET /",
             "landmarks":      "GET /landmarks",
@@ -225,7 +223,7 @@ def geocode_location(q: str = Query(..., min_length=3, max_length=160),
     )
     try:
         with urlopen(request, timeout=8) as response:
-            payload = _json.loads(response.read().decode("utf-8"))
+            payload = json.loads(response.read().decode("utf-8"))
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Location search is temporarily unavailable. Please try again.") from exc
 

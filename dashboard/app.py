@@ -253,6 +253,8 @@ def render_ride_planner():
         destination_query = st.text_input("Destination", placeholder="Street, landmark, or city and country")
         search_locations = st.form_submit_button("Search locations", type="primary")
     if search_locations:
+        for key in ("global_origins", "global_destinations", "ride_quote", "ride_route"):
+            st.session_state.pop(key, None)
         if len(origin_query.strip()) < 3 or len(destination_query.strip()) < 3:
             st.error("Enter at least three characters for both locations.")
         else:
@@ -265,6 +267,8 @@ def render_ride_planner():
                 elif not destinations:
                     st.error("No destinations matched. Try adding a city or country.")
                 else:
+                    st.session_state["world_pickup_result"] = 0
+                    st.session_state["world_destination_result"] = 0
                     st.session_state["global_origins"] = origins
                     st.session_state["global_destinations"] = destinations
                     st.session_state["global_origin_query"] = origin_query.strip()
